@@ -1,0 +1,25 @@
+apiVersion: v2
+name: muthur-collector
+description: Lightweight Kubernetes alert collector agent
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.24.0-0"
+home: https://github.com/VojtechPastyrik/muthur-collector
+sources:
+  - https://github.com/VojtechPastyrik/muthur-collector
+maintainers:
+  - name: Vojtech Pastyrik
+    email: vojtech@pastyrik.dev
+    url: https://pastyrik.dev
+keywords:
+  - monitoring
+  - kubernetes
+  - alerting
+  - collector
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/maintainers: |
+    - name: Vojtech Pastyrik
+      email: vojtech@pastyrik.dev

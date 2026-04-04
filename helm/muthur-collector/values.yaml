@@ -1,0 +1,42 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/vojtechpastyrik/muthur-collector
+  tag: ""
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+config:
+  clusterId: cluster-a
+  lokiUrl: http://loki.monitoring.svc:3100
+  lokiLookbackMinutes: 15
+  lokiMaxLogLines: 200
+  prometheusUrl: http://prometheus.monitoring.svc:9090
+  prometheusLookbackMinutes: 30
+  prometheusEnabled: true
+  logLevel: info
+  redactLogStats: true
+  redactExtraPatterns: ""
+
+externalSecrets:
+  enabled: true
+  secretStoreName: vault-backend
+  secretStoreKind: ClusterSecretStore
+  remoteSecretPath: muthur-collector/prod
+  refreshInterval: 1h
+
+devSecrets:
+  enabled: false
+  centralAgentUrl: ""
+  centralAgentToken: ""
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 64Mi
+  requests:
+    cpu: 50m
+    memory: 32Mi
