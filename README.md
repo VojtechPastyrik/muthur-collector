@@ -2,7 +2,7 @@
 
 Lightweight Kubernetes alert collector agent. Part of the [muthur](https://github.com/VojtechPastyrik) monitoring system.
 
-Receives AlertManager webhooks, resolves alert targets via the K8s API, fetches logs from Loki and metrics from Prometheus, redacts PII and credentials, and forwards enriched protobuf payloads to [muthur-central](https://github.com/VojtechPastyrik/muthur-central).
+Receives AlertManager webhooks, resolves alert targets via the K8s API, fetches logs from Loki and metrics from Prometheus, redacts PII and credentials, and forwards enriched protobuf payloads to [muthur](https://github.com/VojtechPastyrik/muthur).
 
 ```
 AlertManager
@@ -17,7 +17,7 @@ muthur-collector
   - protobuf encode + forward
      |
      v
-muthur-central
+  muthur
 ```
 
 ## Prerequisites
@@ -31,7 +31,7 @@ muthur-central
 ```bash
 make proto
 cp .env.example .env
-# Edit .env with cluster ID, central agent URL and token
+# Edit .env with cluster ID, muthur server URL, and token
 make dev
 ```
 
