@@ -104,8 +104,8 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 		return
 	}
 
-	// Fetch logs from Loki
-	if len(target.ResolvedPods) > 0 && namespace != "" {
+	// Fetch logs from Loki (skipped entirely when disabled via LOKI_ENABLED=false)
+	if p.loki != nil && len(target.ResolvedPods) > 0 && namespace != "" {
 		logs, err := p.loki.FetchLogs(ctx, namespace, target.ResolvedPods)
 		if err != nil {
 			p.logger.Warn("failed to fetch logs", zap.Error(err))

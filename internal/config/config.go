@@ -10,6 +10,7 @@ type Config struct {
 	ClusterID            string
 	CentralAgentURL      string
 	CentralAgentToken    string
+	LokiEnabled          bool
 	LokiURL              string
 	LokiLookbackMinutes  int
 	LokiMaxLogLines      int
@@ -23,6 +24,7 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	lokiEnabled, _ := strconv.ParseBool(envOr("LOKI_ENABLED", "true"))
 	lokiLookback, _ := strconv.Atoi(envOr("LOKI_LOOKBACK_MINUTES", "15"))
 	lokiMaxLines, _ := strconv.Atoi(envOr("LOKI_MAX_LOG_LINES", "200"))
 	promLookback, _ := strconv.Atoi(envOr("PROMETHEUS_LOOKBACK_MINUTES", "30"))
@@ -33,6 +35,7 @@ func Load() (*Config, error) {
 		ClusterID:            os.Getenv("CLUSTER_ID"),
 		CentralAgentURL:      os.Getenv("CENTRAL_AGENT_URL"),
 		CentralAgentToken:    os.Getenv("CENTRAL_AGENT_TOKEN"),
+		LokiEnabled:          lokiEnabled,
 		LokiURL:              envOr("LOKI_URL", "http://loki.monitoring.svc:3100"),
 		LokiLookbackMinutes:  lokiLookback,
 		LokiMaxLogLines:      lokiMaxLines,

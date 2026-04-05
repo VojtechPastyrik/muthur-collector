@@ -6,6 +6,7 @@ metadata:
     {{- include "muthur-collector.labels" . | nindent 4 }}
 data:
   CLUSTER_ID: {{ .Values.config.clusterId | quote }}
+  LOKI_ENABLED: {{ .Values.config.lokiEnabled | quote }}
   LOKI_URL: {{ .Values.config.lokiUrl | quote }}
   LOKI_LOOKBACK_MINUTES: {{ .Values.config.lokiLookbackMinutes | quote }}
   LOKI_MAX_LOG_LINES: {{ .Values.config.lokiMaxLogLines | quote }}

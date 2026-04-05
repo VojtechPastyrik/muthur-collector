@@ -11,6 +11,9 @@ service:
 
 config:
   clusterId: cluster-a
+  # Set lokiEnabled: false on clusters without a logging stack — the collector
+  # will still forward alerts, just without redacted log excerpts attached.
+  lokiEnabled: true
   lokiUrl: http://loki.monitoring.svc:3100
   lokiLookbackMinutes: 15
   lokiMaxLogLines: 200

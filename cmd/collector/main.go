@@ -48,8 +48,15 @@ func run() error {
 		k8sClient = nil
 	}
 
-	// Components
-	lokiClient := loki.NewClient(cfg.LokiURL, cfg.LokiLookbackMinutes, cfg.LokiMaxLogLines, logger)
+	// Components — loki is optional (clusters without a logging stack can
+	// disable it via LOKI_ENABLED=false and the collector will forward
+	// alerts without log excerpts instead of spamming warnings).
+	var lokiClient *loki.Client
+	if cfg.LokiEnabled {
+		lokiClient = loki.NewClient(cfg.LokiURL, cfg.LokiLookbackMinutes, cfg.LokiMaxLogLines, logger)
+	} else {
+		logger.Info("Loki integration disabled — alerts will be forwarded without log excerpts")
+	}
 	promClient := prometheus.NewClient(cfg.PrometheusURL, cfg.PrometheusLookbackMin, cfg.PrometheusEnabled, logger)
 	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, logger)
 	fwd := forwarder.New(cfg.CentralAgentURL, cfg.CentralAgentToken, logger)

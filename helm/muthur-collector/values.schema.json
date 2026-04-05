@@ -22,6 +22,7 @@
       "type": "object",
       "properties": {
         "clusterId": { "type": "string" },
+        "lokiEnabled": { "type": "boolean" },
         "lokiUrl": { "type": "string" },
         "lokiLookbackMinutes": { "type": "integer", "minimum": 1 },
         "lokiMaxLogLines": { "type": "integer", "minimum": 1 },
