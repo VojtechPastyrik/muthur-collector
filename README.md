@@ -8,20 +8,21 @@ Lightweight Kubernetes alert collector agent. Part of the [muthur](https://githu
 
 Receives AlertManager webhooks, resolves alert targets via the K8s API, fetches logs from Loki and metrics from Prometheus, redacts PII and credentials, and forwards enriched protobuf payloads to [muthur](https://github.com/VojtechPastyrik/muthur).
 
-```
-AlertManager
-     |
-     v
-muthur-collector
-  - webhook receiver
-  - alert target resolver
-  - Loki log fetch
-  - Prometheus metric fetch
-  - PII redaction
-  - protobuf encode + forward
-     |
-     v
-  muthur
+```mermaid
+flowchart TD
+    AM[AlertManager] --> MC
+
+    subgraph MC[muthur-collector]
+        W[webhook receiver]
+        R[alert target resolver]
+        L[Loki log fetch]
+        P[Prometheus metric fetch]
+        X[PII redaction]
+        E[protobuf encode + forward]
+        W --> R --> L --> P --> X --> E
+    end
+
+    MC --> M[muthur]
 ```
 
 ## Prerequisites
