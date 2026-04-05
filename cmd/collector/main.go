@@ -62,7 +62,7 @@ func run() error {
 	fwd := forwarder.New(cfg.CentralAgentURL, cfg.CentralAgentToken, logger)
 	res := resolver.New(k8sClient, logger)
 
-	pipe := pipeline.New(cfg.ClusterID, res, lokiClient, promClient, k8sClient, redactor, fwd, logger)
+	pipe := pipeline.New(cfg.ClusterID, cfg.GrafanaBaseURL, res, lokiClient, promClient, k8sClient, redactor, fwd, logger)
 
 	// HTTP server
 	r := chi.NewRouter()

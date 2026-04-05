@@ -17,18 +17,20 @@ import (
 )
 
 type Pipeline struct {
-	clusterID  string
-	resolver   *resolver.Resolver
-	loki       *loki.Client
-	prom       *prometheus.Client
-	k8sClient  *k8s.Client
-	redactor   *redact.Redactor
-	forwarder  *forwarder.Forwarder
-	logger     *zap.Logger
+	clusterID      string
+	grafanaBaseURL string
+	resolver       *resolver.Resolver
+	loki           *loki.Client
+	prom           *prometheus.Client
+	k8sClient      *k8s.Client
+	redactor       *redact.Redactor
+	forwarder      *forwarder.Forwarder
+	logger         *zap.Logger
 }
 
 func New(
 	clusterID string,
+	grafanaBaseURL string,
 	resolver *resolver.Resolver,
 	lokiClient *loki.Client,
 	promClient *prometheus.Client,
@@ -38,14 +40,15 @@ func New(
 	logger *zap.Logger,
 ) *Pipeline {
 	return &Pipeline{
-		clusterID: clusterID,
-		resolver:  resolver,
-		loki:      lokiClient,
-		prom:      promClient,
-		k8sClient: k8sClient,
-		redactor:  redactor,
-		forwarder: fwd,
-		logger:    logger,
+		clusterID:      clusterID,
+		grafanaBaseURL: grafanaBaseURL,
+		resolver:       resolver,
+		loki:           lokiClient,
+		prom:           promClient,
+		k8sClient:      k8sClient,
+		redactor:       redactor,
+		forwarder:      fwd,
+		logger:         logger,
 	}
 }
 
@@ -73,16 +76,17 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 
 	// Build payload
 	payload := &pb.AlertPayload{
-		ClusterId:   p.clusterID,
-		AlertName:   alertName,
-		Severity:    severity,
-		Namespace:   namespace,
-		PodName:     target.PodName,
-		FiredAt:     alert.StartsAt.Unix(),
-		Summary:     alert.Annotations["summary"],
-		Description: alert.Annotations["description"],
-		Target:      target,
-		Status:      status,
+		ClusterId:      p.clusterID,
+		AlertName:      alertName,
+		Severity:       severity,
+		Namespace:      namespace,
+		PodName:        target.PodName,
+		FiredAt:        alert.StartsAt.Unix(),
+		Summary:        alert.Annotations["summary"],
+		Description:    alert.Annotations["description"],
+		Target:         target,
+		Status:         status,
+		GrafanaBaseUrl: p.grafanaBaseURL,
 	}
 
 	// Convert labels

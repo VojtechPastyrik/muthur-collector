@@ -17,6 +17,7 @@ type Config struct {
 	PrometheusURL        string
 	PrometheusLookbackMin int
 	PrometheusEnabled    bool
+	GrafanaBaseURL       string
 	RedactExtraPatterns  string
 	RedactLogStats       bool
 	Port                 string
@@ -42,6 +43,7 @@ func Load() (*Config, error) {
 		PrometheusURL:        envOr("PROMETHEUS_URL", "http://prometheus.monitoring.svc:9090"),
 		PrometheusLookbackMin: promLookback,
 		PrometheusEnabled:    promEnabled,
+		GrafanaBaseURL:       os.Getenv("GRAFANA_BASE_URL"),
 		RedactExtraPatterns:  os.Getenv("REDACT_EXTRA_PATTERNS"),
 		RedactLogStats:       redactStats,
 		Port:                 envOr("PORT", "8080"),

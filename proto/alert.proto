@@ -23,6 +23,7 @@ message AlertPayload {
   int32 total_replacements = 16;
 
   string status = 17; // firing | resolved
+  string grafana_base_url = 18; // collector-provided Grafana base URL
 }
 
 message AlertTarget {

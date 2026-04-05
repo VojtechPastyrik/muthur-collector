@@ -29,6 +29,7 @@
         "prometheusUrl": { "type": "string" },
         "prometheusLookbackMinutes": { "type": "integer", "minimum": 1 },
         "prometheusEnabled": { "type": "boolean" },
+        "grafanaBaseUrl": { "type": "string" },
         "logLevel": { "type": "string", "enum": ["debug", "info", "warn", "error"] },
         "redactLogStats": { "type": "boolean" },
         "redactExtraPatterns": { "type": "string" }

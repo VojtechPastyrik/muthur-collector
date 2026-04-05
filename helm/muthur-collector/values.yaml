@@ -20,6 +20,9 @@ config:
   prometheusUrl: http://prometheus.monitoring.svc:9090
   prometheusLookbackMinutes: 30
   prometheusEnabled: true
+  # Grafana base URL sent with every forwarded alert — muthur uses it to build
+  # per-cluster Explore deep links in notifications. Leave empty to omit.
+  grafanaBaseUrl: ""
   logLevel: info
   redactLogStats: true
   redactExtraPatterns: ""

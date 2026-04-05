@@ -13,6 +13,7 @@ data:
   PROMETHEUS_URL: {{ .Values.config.prometheusUrl | quote }}
   PROMETHEUS_LOOKBACK_MINUTES: {{ .Values.config.prometheusLookbackMinutes | quote }}
   PROMETHEUS_ENABLED: {{ .Values.config.prometheusEnabled | quote }}
+  GRAFANA_BASE_URL: {{ .Values.config.grafanaBaseUrl | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   REDACT_LOG_STATS: {{ .Values.config.redactLogStats | quote }}
   REDACT_EXTRA_PATTERNS: {{ .Values.config.redactExtraPatterns | quote }}
