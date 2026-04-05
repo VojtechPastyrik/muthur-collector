@@ -2,9 +2,10 @@ apiVersion: v2
 name: muthur-collector
 description: Lightweight Kubernetes alert collector agent
 type: application
-version: 0.1.4
+version: 0.1.5
 appVersion: "0.1.4"
 kubeVersion: ">=1.24.0-0"
+icon: https://assets.pastyrik.dev/images/muthur-icon.png
 home: https://github.com/VojtechPastyrik/muthur-collector
 sources:
   - https://github.com/VojtechPastyrik/muthur-collector

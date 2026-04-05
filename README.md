@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://assets.pastyrik.dev/images/muthur.png" width="200" alt="muthur-collector">
+</p>
+
 # muthur-collector
 
 Lightweight Kubernetes alert collector agent. Part of the [muthur](https://github.com/VojtechPastyrik) monitoring system.
