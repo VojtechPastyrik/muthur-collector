@@ -106,3 +106,38 @@ jobs:
           git add index.yaml muthur-collector-*.tgz
           git diff --staged --quiet || git commit -m "muthur-collector ${GITHUB_REF_NAME}"
           git push
+
+  github-release:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [docker, helm-update]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            **Docker image:**
+            ```
+            docker pull ghcr.io/vojtechpastyrik/muthur-collector:${{ github.ref_name }}
+            ```
+
+            **Helm chart:**
+            ```
+            helm repo add vojtechpastyrik https://vojtechpastyrik.github.io/charts
+            helm repo update
+            helm install muthur-collector vojtechpastyrik/muthur-collector --version ${{ steps.version.outputs.value }}
+            ```
