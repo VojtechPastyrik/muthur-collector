@@ -21,6 +21,8 @@ message AlertPayload {
   int32 total_log_lines    = 14;
   int32 redacted_log_lines = 15;
   int32 total_replacements = 16;
+
+  string status = 17; // firing | resolved
 }
 
 message AlertTarget {

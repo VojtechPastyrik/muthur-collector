@@ -39,6 +39,7 @@ type AlertPayload struct {
 	TotalLogLines     int32                  `protobuf:"varint,14,opt,name=total_log_lines,json=totalLogLines,proto3" json:"total_log_lines,omitempty"`
 	RedactedLogLines  int32                  `protobuf:"varint,15,opt,name=redacted_log_lines,json=redactedLogLines,proto3" json:"redacted_log_lines,omitempty"`
 	TotalReplacements int32                  `protobuf:"varint,16,opt,name=total_replacements,json=totalReplacements,proto3" json:"total_replacements,omitempty"`
+	Status            string                 `protobuf:"bytes,17,opt,name=status,proto3" json:"status,omitempty"` // firing | resolved
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -183,6 +184,13 @@ func (x *AlertPayload) GetTotalReplacements() int32 {
 		return x.TotalReplacements
 	}
 	return 0
+}
+
+func (x *AlertPayload) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
 }
 
 type AlertTarget struct {
@@ -561,7 +569,7 @@ var File_proto_alert_proto protoreflect.FileDescriptor
 
 const file_proto_alert_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/alert.proto\x12\rmonitoring.v1\"\xf0\x04\n" +
+	"\x11proto/alert.proto\x12\rmonitoring.v1\"\x88\x05\n" +
 	"\fAlertPayload\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1d\n" +
@@ -581,7 +589,8 @@ const file_proto_alert_proto_rawDesc = "" +
 	"\x06labels\x18\r \x03(\v2\x14.monitoring.v1.LabelR\x06labels\x12&\n" +
 	"\x0ftotal_log_lines\x18\x0e \x01(\x05R\rtotalLogLines\x12,\n" +
 	"\x12redacted_log_lines\x18\x0f \x01(\x05R\x10redactedLogLines\x12-\n" +
-	"\x12total_replacements\x18\x10 \x01(\x05R\x11totalReplacements\"\xf0\x01\n" +
+	"\x12total_replacements\x18\x10 \x01(\x05R\x11totalReplacements\x12\x16\n" +
+	"\x06status\x18\x11 \x01(\tR\x06status\"\xf0\x01\n" +
 	"\vAlertTarget\x12\x1f\n" +
 	"\vtarget_type\x18\x01 \x01(\tR\n" +
 	"targetType\x12\x19\n" +

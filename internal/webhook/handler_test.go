@@ -6,20 +6,49 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 )
 
 type mockProcessor struct {
-	alerts []Alert
+	alerts chan Alert
+}
+
+func newMockProcessor() *mockProcessor {
+	return &mockProcessor{alerts: make(chan Alert, 8)}
 }
 
 func (m *mockProcessor) ProcessAlert(alert Alert) {
-	m.alerts = append(m.alerts, alert)
+	m.alerts <- alert
+}
+
+// drain returns all alerts received within the timeout window.
+func (m *mockProcessor) drain(t *testing.T, want int, timeout time.Duration) []Alert {
+	t.Helper()
+	got := make([]Alert, 0, want)
+	deadline := time.After(timeout)
+	for len(got) < want {
+		select {
+		case a := <-m.alerts:
+			got = append(got, a)
+		case <-deadline:
+			return got
+		}
+	}
+	// Drain any extra that may arrive immediately after (to detect over-delivery).
+	for {
+		select {
+		case a := <-m.alerts:
+			got = append(got, a)
+		case <-time.After(50 * time.Millisecond):
+			return got
+		}
+	}
 }
 
 func TestHandler_FiringAlert(t *testing.T) {
-	proc := &mockProcessor{}
+	proc := newMockProcessor()
 	handler := NewHandler(proc, zap.NewNop())
 
 	payload := AlertManagerPayload{
@@ -48,16 +77,19 @@ func TestHandler_FiringAlert(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	if len(proc.alerts) != 1 {
-		t.Fatalf("expected 1 alert, got %d", len(proc.alerts))
+	alerts := proc.drain(t, 1, time.Second)
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
 	}
-	if proc.alerts[0].Labels["alertname"] != "HighMemory" {
+	if alerts[0].Labels["alertname"] != "HighMemory" {
 		t.Error("wrong alert name")
 	}
 }
 
-func TestHandler_ResolvedAlertSkipped(t *testing.T) {
-	proc := &mockProcessor{}
+// Resolved alerts are now forwarded to central so the pipeline can emit a
+// "resolved" notification. The collector no longer filters them out.
+func TestHandler_ResolvedAlertForwarded(t *testing.T) {
+	proc := newMockProcessor()
 	handler := NewHandler(proc, zap.NewNop())
 
 	payload := AlertManagerPayload{
@@ -72,13 +104,17 @@ func TestHandler_ResolvedAlertSkipped(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if len(proc.alerts) != 0 {
-		t.Error("resolved alerts should be skipped")
+	alerts := proc.drain(t, 1, time.Second)
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 resolved alert forwarded, got %d", len(alerts))
+	}
+	if alerts[0].Status != "resolved" {
+		t.Errorf("expected status resolved, got %q", alerts[0].Status)
 	}
 }
 
 func TestHandler_InvalidJSON(t *testing.T) {
-	handler := NewHandler(&mockProcessor{}, zap.NewNop())
+	handler := NewHandler(newMockProcessor(), zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader([]byte("not json")))
 	w := httptest.NewRecorder()
@@ -91,7 +127,7 @@ func TestHandler_InvalidJSON(t *testing.T) {
 }
 
 func TestHandler_MethodNotAllowed(t *testing.T) {
-	handler := NewHandler(&mockProcessor{}, zap.NewNop())
+	handler := NewHandler(newMockProcessor(), zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
 	w := httptest.NewRecorder()
@@ -104,7 +140,7 @@ func TestHandler_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHandler_MultipleAlerts(t *testing.T) {
-	proc := &mockProcessor{}
+	proc := newMockProcessor()
 	handler := NewHandler(proc, zap.NewNop())
 
 	payload := AlertManagerPayload{
@@ -121,7 +157,9 @@ func TestHandler_MultipleAlerts(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if len(proc.alerts) != 2 {
-		t.Fatalf("expected 2 firing alerts, got %d", len(proc.alerts))
+	// All three alerts (including resolved) should be forwarded.
+	alerts := proc.drain(t, 3, time.Second)
+	if len(alerts) != 3 {
+		t.Fatalf("expected 3 alerts forwarded, got %d", len(alerts))
 	}
 }

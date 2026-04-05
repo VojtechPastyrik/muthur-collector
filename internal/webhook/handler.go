@@ -60,11 +60,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("received alertmanager webhook", zap.Int("alert_count", len(payload.Alerts)))
 
+	// Process alerts asynchronously — AlertManager has a short webhook timeout
+	// (10s default) and the full pipeline (k8s lookup, Loki, Prometheus, forward
+	// to central, Claude evaluation) routinely exceeds it. Ack immediately and
+	// let goroutines do the work in the background.
 	for _, alert := range payload.Alerts {
-		if alert.Status != "firing" {
-			continue
-		}
-		h.processor.ProcessAlert(alert)
+		a := alert
+		go h.processor.ProcessAlert(a)
 	}
 
 	w.WriteHeader(http.StatusOK)

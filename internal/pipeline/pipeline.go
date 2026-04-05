@@ -56,11 +56,16 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 	alertName := alert.Labels["alertname"]
 	severity := alert.Labels["severity"]
 	namespace := alert.Labels["namespace"]
+	status := alert.Status
+	if status == "" {
+		status = "firing"
+	}
 
 	p.logger.Info("processing alert",
 		zap.String("alert", alertName),
 		zap.String("severity", severity),
 		zap.String("namespace", namespace),
+		zap.String("status", status),
 	)
 
 	// Resolve target
@@ -77,11 +82,26 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 		Summary:     alert.Annotations["summary"],
 		Description: alert.Annotations["description"],
 		Target:      target,
+		Status:      status,
 	}
 
 	// Convert labels
 	for k, v := range alert.Labels {
 		payload.Labels = append(payload.Labels, &pb.Label{Name: k, Value: v})
+	}
+
+	// Resolved alerts need no enrichment — central only sends a "resolved"
+	// notification, no Claude evaluation, no logs/metrics required.
+	if status == "resolved" {
+		if err := p.forwarder.Forward(ctx, payload); err != nil {
+			p.logger.Error("failed to forward resolved alert",
+				zap.String("alert", alertName),
+				zap.Error(err),
+			)
+		} else {
+			p.logger.Info("resolved alert forwarded", zap.String("alert", alertName))
+		}
+		return
 	}
 
 	// Fetch logs from Loki
