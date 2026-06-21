@@ -49,7 +49,7 @@ func (m *mockProcessor) drain(t *testing.T, want int, timeout time.Duration) []A
 
 func TestHandler_FiringAlert(t *testing.T) {
 	proc := newMockProcessor()
-	handler := NewHandler(proc, zap.NewNop())
+	handler := NewHandler(proc, 50, zap.NewNop())
 
 	payload := AlertManagerPayload{
 		Alerts: []Alert{
@@ -90,7 +90,7 @@ func TestHandler_FiringAlert(t *testing.T) {
 // "resolved" notification. The collector no longer filters them out.
 func TestHandler_ResolvedAlertForwarded(t *testing.T) {
 	proc := newMockProcessor()
-	handler := NewHandler(proc, zap.NewNop())
+	handler := NewHandler(proc, 50, zap.NewNop())
 
 	payload := AlertManagerPayload{
 		Alerts: []Alert{
@@ -114,7 +114,7 @@ func TestHandler_ResolvedAlertForwarded(t *testing.T) {
 }
 
 func TestHandler_InvalidJSON(t *testing.T) {
-	handler := NewHandler(newMockProcessor(), zap.NewNop())
+	handler := NewHandler(newMockProcessor(), 50, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader([]byte("not json")))
 	w := httptest.NewRecorder()
@@ -127,7 +127,7 @@ func TestHandler_InvalidJSON(t *testing.T) {
 }
 
 func TestHandler_MethodNotAllowed(t *testing.T) {
-	handler := NewHandler(newMockProcessor(), zap.NewNop())
+	handler := NewHandler(newMockProcessor(), 50, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
 	w := httptest.NewRecorder()
@@ -141,7 +141,7 @@ func TestHandler_MethodNotAllowed(t *testing.T) {
 
 func TestHandler_MultipleAlerts(t *testing.T) {
 	proc := newMockProcessor()
-	handler := NewHandler(proc, zap.NewNop())
+	handler := NewHandler(proc, 50, zap.NewNop())
 
 	payload := AlertManagerPayload{
 		Alerts: []Alert{

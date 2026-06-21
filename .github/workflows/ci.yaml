@@ -16,10 +16,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Generate protobuf
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           make proto
+
+      - name: Check proto contract sync
+        run: make proto-check
 
       # golangci-lint disabled — no released version yet ships built with
       # Go 1.26, and the go.mod directive targets 1.26.1. Re-enable once

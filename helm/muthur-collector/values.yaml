@@ -9,6 +9,14 @@ service:
   type: ClusterIP
   port: 8080
 
+# Prometheus Operator ServiceMonitor for the /metrics endpoint. Enable when
+# kube-prometheus-stack (or any Prometheus Operator) is present.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
 config:
   clusterId: cluster-a
   # Set lokiEnabled: false on clusters without a logging stack — the collector
@@ -26,6 +34,16 @@ config:
   logLevel: info
   redactLogStats: true
   redactExtraPatterns: ""
+  # Redaction is a security boundary, so its size guards fail CLOSED: a log line
+  # over redactMaxLineBytes is dropped (never forwarded raw), and once the
+  # cumulative payload reaches redactMaxTotalBytes the remaining lines are
+  # dropped. Bounds both PII-leak risk and the downstream LLM token bill.
+  redactMaxLineBytes: 8192
+  redactMaxTotalBytes: 262144
+  # Max alerts processed concurrently. Under a storm, alerts over this ceiling
+  # are dropped (counted in muthur_collector_alerts_dropped_total) instead of
+  # spawning unbounded goroutines — the AlertManager webhook is never wedged.
+  webhookMaxConcurrent: 50
 
 externalSecrets:
   enabled: true

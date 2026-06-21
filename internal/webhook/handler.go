@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/VojtechPastyrik/muthur-collector/internal/metrics"
 )
 
 // AlertManagerPayload represents the AlertManager webhook JSON body.
@@ -28,12 +30,22 @@ type AlertProcessor interface {
 
 type Handler struct {
 	processor AlertProcessor
+	sem       chan struct{}
 	logger    *zap.Logger
 }
 
-func NewHandler(processor AlertProcessor, logger *zap.Logger) *Handler {
+// NewHandler builds the webhook handler. maxConcurrent bounds the number of
+// alerts processed at once; under a storm, alerts beyond the ceiling are
+// dropped (with a metric) rather than spawning unbounded goroutines — the
+// AlertManager webhook is always acked immediately and never wedges. A
+// non-positive value falls back to a safe default.
+func NewHandler(processor AlertProcessor, maxConcurrent int, logger *zap.Logger) *Handler {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 50
+	}
 	return &Handler{
 		processor: processor,
+		sem:       make(chan struct{}, maxConcurrent),
 		logger:    logger,
 	}
 }
@@ -63,10 +75,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Process alerts asynchronously — AlertManager has a short webhook timeout
 	// (10s default) and the full pipeline (k8s lookup, Loki, Prometheus, forward
 	// to central, Claude evaluation) routinely exceeds it. Ack immediately and
-	// let goroutines do the work in the background.
+	// let bounded worker goroutines do the work in the background. The semaphore
+	// caps concurrency so an alert storm can't exhaust memory/file descriptors;
+	// alerts over the ceiling are dropped, never blocked, so AlertManager is
+	// never wedged.
 	for _, alert := range payload.Alerts {
 		a := alert
-		go h.processor.ProcessAlert(a)
+		select {
+		case h.sem <- struct{}{}:
+			go func() {
+				defer func() { <-h.sem }()
+				h.processor.ProcessAlert(a)
+			}()
+		default:
+			metrics.AlertsDropped.Inc()
+			h.logger.Warn("dropping alert: collector at concurrency ceiling",
+				zap.String("alert", a.Labels["alertname"]),
+				zap.String("namespace", a.Labels["namespace"]),
+			)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

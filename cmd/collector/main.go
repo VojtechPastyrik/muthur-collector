@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -58,7 +59,7 @@ func run() error {
 		logger.Info("Loki integration disabled — alerts will be forwarded without log excerpts")
 	}
 	promClient := prometheus.NewClient(cfg.PrometheusURL, cfg.PrometheusLookbackMin, cfg.PrometheusEnabled, logger)
-	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, logger)
+	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, cfg.RedactMaxLineBytes, cfg.RedactMaxTotalBytes, logger)
 	fwd := forwarder.New(cfg.CentralAgentURL, cfg.CentralAgentToken, logger)
 	res := resolver.New(k8sClient, logger)
 
@@ -69,8 +70,10 @@ func run() error {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 
-	handler := webhook.NewHandler(pipe, logger)
+	handler := webhook.NewHandler(pipe, cfg.WebhookMaxConcurrent, logger)
 	r.Post("/webhook", handler.ServeHTTP)
+
+	r.Handle("/metrics", promhttp.Handler())
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

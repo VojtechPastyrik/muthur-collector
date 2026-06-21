@@ -17,4 +17,7 @@ data:
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   REDACT_LOG_STATS: {{ .Values.config.redactLogStats | quote }}
   REDACT_EXTRA_PATTERNS: {{ .Values.config.redactExtraPatterns | quote }}
+  REDACT_MAX_LINE_BYTES: {{ .Values.config.redactMaxLineBytes | quote }}
+  REDACT_MAX_TOTAL_BYTES: {{ .Values.config.redactMaxTotalBytes | quote }}
+  WEBHOOK_MAX_CONCURRENT: {{ .Values.config.webhookMaxConcurrent | quote }}
   PORT: "8080"

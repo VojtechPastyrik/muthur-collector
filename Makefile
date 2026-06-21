@@ -1,7 +1,12 @@
-.PHONY: proto dev build docker lint test helm-lint
+.PHONY: proto proto-check dev build docker lint test helm-lint
 
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative proto/alert.proto
+
+# Fail if alert.proto has drifted from the shared contract hash (see
+# scripts/check-proto-sync.sh). Keep muthur-collector and muthur in lockstep.
+proto-check:
+	./scripts/check-proto-sync.sh
 
 dev:
 	go run ./cmd/collector

@@ -9,6 +9,7 @@ import (
 	"github.com/VojtechPastyrik/muthur-collector/internal/forwarder"
 	"github.com/VojtechPastyrik/muthur-collector/internal/k8s"
 	"github.com/VojtechPastyrik/muthur-collector/internal/loki"
+	"github.com/VojtechPastyrik/muthur-collector/internal/metrics"
 	"github.com/VojtechPastyrik/muthur-collector/internal/prometheus"
 	"github.com/VojtechPastyrik/muthur-collector/internal/redact"
 	"github.com/VojtechPastyrik/muthur-collector/internal/resolver"
@@ -63,6 +64,7 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 	if status == "" {
 		status = "firing"
 	}
+	metrics.AlertsReceived.WithLabelValues(status).Inc()
 
 	p.logger.Info("processing alert",
 		zap.String("alert", alertName),
@@ -110,8 +112,11 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 
 	// Fetch logs from Loki (skipped entirely when disabled via LOKI_ENABLED=false)
 	if p.loki != nil && len(target.ResolvedPods) > 0 && namespace != "" {
+		lokiStart := time.Now()
 		logs, err := p.loki.FetchLogs(ctx, namespace, target.ResolvedPods)
+		metrics.EnrichDuration.WithLabelValues("loki").Observe(time.Since(lokiStart).Seconds())
 		if err != nil {
+			metrics.EnrichErrors.WithLabelValues("loki").Inc()
 			p.logger.Warn("failed to fetch logs", zap.Error(err))
 		} else if len(logs) > 0 {
 			redacted, stats := p.redactor.Redact(logs)
@@ -123,11 +128,14 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 	}
 
 	// Fetch metrics from Prometheus
-	metrics, err := p.prom.FetchMetrics(ctx, target.TargetType, namespace, target.ResolvedPods, target.Node)
+	promStart := time.Now()
+	promMetrics, err := p.prom.FetchMetrics(ctx, target.TargetType, namespace, target.ResolvedPods, target.Node)
+	metrics.EnrichDuration.WithLabelValues("prometheus").Observe(time.Since(promStart).Seconds())
 	if err != nil {
+		metrics.EnrichErrors.WithLabelValues("prometheus").Inc()
 		p.logger.Warn("failed to fetch metrics", zap.Error(err))
 	} else {
-		payload.Metrics = metrics
+		payload.Metrics = promMetrics
 	}
 
 	// Fetch pod metadata

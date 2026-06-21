@@ -7,21 +7,24 @@ import (
 )
 
 type Config struct {
-	ClusterID            string
-	CentralAgentURL      string
-	CentralAgentToken    string
-	LokiEnabled          bool
-	LokiURL              string
-	LokiLookbackMinutes  int
-	LokiMaxLogLines      int
-	PrometheusURL        string
+	ClusterID             string
+	CentralAgentURL       string
+	CentralAgentToken     string
+	LokiEnabled           bool
+	LokiURL               string
+	LokiLookbackMinutes   int
+	LokiMaxLogLines       int
+	PrometheusURL         string
 	PrometheusLookbackMin int
-	PrometheusEnabled    bool
-	GrafanaBaseURL       string
-	RedactExtraPatterns  string
-	RedactLogStats       bool
-	Port                 string
-	LogLevel             string
+	PrometheusEnabled     bool
+	GrafanaBaseURL        string
+	RedactExtraPatterns   string
+	RedactLogStats        bool
+	RedactMaxLineBytes    int
+	RedactMaxTotalBytes   int
+	WebhookMaxConcurrent  int
+	Port                  string
+	LogLevel              string
 }
 
 func Load() (*Config, error) {
@@ -31,23 +34,29 @@ func Load() (*Config, error) {
 	promLookback, _ := strconv.Atoi(envOr("PROMETHEUS_LOOKBACK_MINUTES", "30"))
 	promEnabled, _ := strconv.ParseBool(envOr("PROMETHEUS_ENABLED", "true"))
 	redactStats, _ := strconv.ParseBool(envOr("REDACT_LOG_STATS", "true"))
+	redactMaxLineBytes, _ := strconv.Atoi(envOr("REDACT_MAX_LINE_BYTES", "8192"))
+	redactMaxTotalBytes, _ := strconv.Atoi(envOr("REDACT_MAX_TOTAL_BYTES", "262144"))
+	webhookMaxConcurrent, _ := strconv.Atoi(envOr("WEBHOOK_MAX_CONCURRENT", "50"))
 
 	cfg := &Config{
-		ClusterID:            os.Getenv("CLUSTER_ID"),
-		CentralAgentURL:      os.Getenv("CENTRAL_AGENT_URL"),
-		CentralAgentToken:    os.Getenv("CENTRAL_AGENT_TOKEN"),
-		LokiEnabled:          lokiEnabled,
-		LokiURL:              envOr("LOKI_URL", "http://loki.monitoring.svc:3100"),
-		LokiLookbackMinutes:  lokiLookback,
-		LokiMaxLogLines:      lokiMaxLines,
-		PrometheusURL:        envOr("PROMETHEUS_URL", "http://prometheus.monitoring.svc:9090"),
+		ClusterID:             os.Getenv("CLUSTER_ID"),
+		CentralAgentURL:       os.Getenv("CENTRAL_AGENT_URL"),
+		CentralAgentToken:     os.Getenv("CENTRAL_AGENT_TOKEN"),
+		LokiEnabled:           lokiEnabled,
+		LokiURL:               envOr("LOKI_URL", "http://loki.monitoring.svc:3100"),
+		LokiLookbackMinutes:   lokiLookback,
+		LokiMaxLogLines:       lokiMaxLines,
+		PrometheusURL:         envOr("PROMETHEUS_URL", "http://prometheus.monitoring.svc:9090"),
 		PrometheusLookbackMin: promLookback,
-		PrometheusEnabled:    promEnabled,
-		GrafanaBaseURL:       os.Getenv("GRAFANA_BASE_URL"),
-		RedactExtraPatterns:  os.Getenv("REDACT_EXTRA_PATTERNS"),
-		RedactLogStats:       redactStats,
-		Port:                 envOr("PORT", "8080"),
-		LogLevel:             envOr("LOG_LEVEL", "info"),
+		PrometheusEnabled:     promEnabled,
+		GrafanaBaseURL:        os.Getenv("GRAFANA_BASE_URL"),
+		RedactExtraPatterns:   os.Getenv("REDACT_EXTRA_PATTERNS"),
+		RedactLogStats:        redactStats,
+		RedactMaxLineBytes:    redactMaxLineBytes,
+		RedactMaxTotalBytes:   redactMaxTotalBytes,
+		WebhookMaxConcurrent:  webhookMaxConcurrent,
+		Port:                  envOr("PORT", "8080"),
+		LogLevel:              envOr("LOG_LEVEL", "info"),
 	}
 
 	if cfg.ClusterID == "" {

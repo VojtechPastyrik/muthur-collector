@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/VojtechPastyrik/muthur-collector/internal/metrics"
 	pb "github.com/VojtechPastyrik/muthur-collector/proto"
 )
 
@@ -31,24 +32,37 @@ func New(url, token string, logger *zap.Logger) *Forwarder {
 }
 
 func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error {
+	start := time.Now()
+	defer func() { metrics.ForwardDuration.Observe(time.Since(start).Seconds()) }()
+
 	data, err := proto.Marshal(payload)
 	if err != nil {
+		metrics.Forwards.WithLabelValues("error").Inc()
 		return fmt.Errorf("marshal protobuf: %w", err)
 	}
 
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
+			metrics.ForwardRetries.Inc()
 			backoff := time.Duration(1<<uint(attempt)) * time.Second
 			f.logger.Warn("retrying forward",
 				zap.Int("attempt", attempt+1),
 				zap.Duration("backoff", backoff),
 			)
-			time.Sleep(backoff)
+			// Honour cancellation during backoff so a shutdown or deadline
+			// doesn't get stuck sleeping on a dead central.
+			select {
+			case <-ctx.Done():
+				metrics.Forwards.WithLabelValues("error").Inc()
+				return fmt.Errorf("forward cancelled during backoff: %w", ctx.Err())
+			case <-time.After(backoff):
+			}
 		}
 
 		err := f.send(ctx, data)
 		if err == nil {
+			metrics.Forwards.WithLabelValues("ok").Inc()
 			return nil
 		}
 		lastErr = err
@@ -57,6 +71,8 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 			zap.Error(err),
 		)
 	}
+
+	metrics.Forwards.WithLabelValues("error").Inc()
 
 	return fmt.Errorf("forward failed after 3 attempts: %w", lastErr)
 }
