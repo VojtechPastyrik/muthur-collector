@@ -8,6 +8,8 @@ Lightweight Kubernetes alert collector agent. Part of the [muthur](https://githu
 
 Receives AlertManager webhooks, resolves alert targets via the K8s API, fetches logs from Loki and metrics from Prometheus, redacts PII and credentials, and forwards enriched protobuf payloads to [muthur](https://github.com/VojtechPastyrik/muthur).
 
+<sub>**Keywords:** Kubernetes alert enrichment · AlertManager webhook collector · Loki log + Prometheus metric enrichment · PII / credential redaction · AIOps · SRE · observability · self-hosted.</sub>
+
 ```mermaid
 flowchart TD
     AM[AlertManager] --> MC
