@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" width="200" alt="muthur-collector">
+    <img src="https://assets.pastyrik.dev/images/muthur-icon.png" width="160" alt="muthur">
 </p>
 
 # muthur-collector
