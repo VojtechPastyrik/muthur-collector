@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] — Unreleased
+## [0.7.0] — Unreleased
 
 Theme: the collector now talks to the brain over mutual TLS. The
 shared bearer token (`X-Collector-Token`) is gone.
@@ -56,10 +56,10 @@ shared bearer token (`X-Collector-Token`) is gone.
 
 ### Migration
 
-See [docs/migration-0.3-mtls.md](docs/migration-0.3-mtls.md). A
+See [docs/migration-0.7-mtls.md](docs/migration-0.7-mtls.md). A
 coordinated brain (`muthur` chart 0.7.0) + collector (this chart
-0.3.0) merge is required. There is no dual-accept mode — collectors
-on 0.2.x will be rejected by a 0.7.0 brain, and 0.3.0 collectors will
+0.7.0) merge is required. There is no dual-accept mode — collectors
+on 0.2.x will be rejected by a 0.7.0 brain, and 0.7.0 collectors will
 be rejected by a 0.6.x brain.
 
 ## [0.2.0]

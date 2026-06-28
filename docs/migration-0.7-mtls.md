@@ -1,4 +1,4 @@
-# Migrating to v0.3 — collector mTLS
+# Migrating to v0.7 — collector mTLS
 
 The collector 0.3 cuts over from the shared `X-Collector-Token` to
 mutual TLS. The brain (`muthur` chart) must be on 0.7.0 at the same
