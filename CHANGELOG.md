@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.0] — Unreleased
+## [0.7.0] — 2026-06-28
 
 Theme: the collector now talks to the brain over mutual TLS. The
 shared bearer token (`X-Collector-Token`) is gone.
