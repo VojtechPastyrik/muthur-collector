@@ -1,0 +1,47 @@
+{{- /*
+  RBAC for the bootstrap init container and the renew CronJob.
+
+  Both flows write the freshly issued cert into a Kubernetes Secret rather
+  than a PVC, so they need API access. Scope is intentionally narrow:
+  read/update/create on a single resourceName so a compromised collector
+  cannot touch any other Secret in its namespace.
+
+  The Role lives in the same namespace as the Deployment; the
+  ServiceAccount is the one the Deployment already uses.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "muthur-collector.fullname" . }}-cert
+  labels:
+    {{- include "muthur-collector.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ include "muthur-collector.fullname" . }}-tls
+    verbs: ["get", "update"]
+  # Create needs a separate rule because resourceNames doesn't apply to
+  # "create" verbs in RBAC (the object doesn't exist yet, so K8s can't
+  # match by name). Mitigation: limit the Role's reach to this namespace
+  # via RoleBinding (not ClusterRoleBinding), and the Deployment's
+  # SecurityContext keeps the SA token confined to the bootstrap and
+  # renew containers.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "muthur-collector.fullname" . }}-cert
+  labels:
+    {{- include "muthur-collector.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "muthur-collector.fullname" . }}-cert
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "muthur-collector.fullname" . }}
+    namespace: {{ .Release.Namespace }}

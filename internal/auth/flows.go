@@ -11,34 +11,74 @@ import (
 	"go.uber.org/zap"
 )
 
+// Persister abstracts cert material storage. The production binary uses
+// SecretStore (writes a Kubernetes Secret via the API); tests use FilePersister
+// (writes to a temp directory).
+type Persister interface {
+	Exists(ctx context.Context) (bool, error)
+	Read(ctx context.Context) (cert, key, ca []byte, err error)
+	Write(ctx context.Context, cert, key, ca []byte) error
+}
+
+// FilePersister is the on-disk implementation backed by CertMaterial. Used by
+// tests and any non-K8s runtime; production wires SecretStore instead.
+type FilePersister struct{ Material CertMaterial }
+
+func (f FilePersister) Exists(_ context.Context) (bool, error) {
+	return f.Material.Exists(), nil
+}
+func (f FilePersister) Read(_ context.Context) (cert, key, ca []byte, err error) {
+	cert, err = os.ReadFile(f.Material.CertFile)
+	if err != nil {
+		return
+	}
+	key, err = os.ReadFile(f.Material.KeyFile)
+	if err != nil {
+		return
+	}
+	if data, e := os.ReadFile(f.Material.CAFile); e == nil {
+		ca = data
+	}
+	return
+}
+func (f FilePersister) Write(_ context.Context, cert, key, ca []byte) error {
+	return WriteMaterial(f.Material, cert, key, ca)
+}
+
 // BootstrapFlow runs the init-container side of the enrolment dance:
 //
-//  1. If a valid cert is already on disk, return immediately. Lets the init
+//  1. If a cert is already persisted, return immediately. Lets the init
 //     container restart safely without re-burning bootstrap tokens.
 //  2. Otherwise, read the one-time bootstrap token, generate a fresh keypair,
-//     send a CSR + token to /bootstrap-cert, write the returned leaf + CA
-//     into the mounted Secret directory.
-//
-// Returns nil on success or when the cert was already provisioned.
+//     send a CSR + token to /bootstrap-cert, and persist the returned leaf
+//     and CA so the main container can mount them.
 type BootstrapFlow struct {
-	ClusterID         string
-	TenantID          string
-	BrainURL          string
+	ClusterID          string
+	TenantID           string
+	BrainURL           string
 	BootstrapTokenFile string
-	CACertFile        string // pre-installed CA bundle (chart-provided)
-	Material          CertMaterial
-	Logger            *zap.Logger
+	VendorCAFile       string // pre-installed CA bundle (chart-provided)
+	Persister          Persister
+	Logger             *zap.Logger
 }
 
 func (b BootstrapFlow) Run(ctx context.Context) error {
-	if b.Material.Exists() {
-		b.Logger.Info("cert material already present — skipping bootstrap",
-			zap.String("cert_dir", b.Material.Dir),
-		)
-		return nil
+	if b.Persister == nil {
+		return errors.New("bootstrap: Persister is required")
 	}
 	if b.ClusterID == "" || b.BrainURL == "" {
 		return errors.New("bootstrap: ClusterID and BrainURL are required")
+	}
+
+	already, err := b.Persister.Exists(ctx)
+	if err != nil {
+		return fmt.Errorf("check existing cert: %w", err)
+	}
+	if already {
+		b.Logger.Info("cert already provisioned — skipping bootstrap",
+			zap.String("cluster_id", b.ClusterID),
+		)
+		return nil
 	}
 
 	tokenBytes, err := os.ReadFile(b.BootstrapTokenFile)
@@ -55,7 +95,7 @@ func (b BootstrapFlow) Run(ctx context.Context) error {
 		return fmt.Errorf("generate CSR: %w", err)
 	}
 
-	client, err := NewBrainClient(b.BrainURL, b.CACertFile)
+	client, err := NewBrainClient(b.BrainURL, b.VendorCAFile)
 	if err != nil {
 		return fmt.Errorf("brain client: %w", err)
 	}
@@ -63,12 +103,11 @@ func (b BootstrapFlow) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap call: %w", err)
 	}
-	if err := WriteMaterial(b.Material, certPEM, keyPEM, caPEM); err != nil {
-		return fmt.Errorf("write material: %w", err)
+	if err := b.Persister.Write(ctx, certPEM, keyPEM, caPEM); err != nil {
+		return fmt.Errorf("persist material: %w", err)
 	}
 
 	b.Logger.Info("bootstrap complete — cert installed",
-		zap.String("cert_dir", b.Material.Dir),
 		zap.String("cluster_id", b.ClusterID),
 	)
 	return nil
@@ -76,57 +115,84 @@ func (b BootstrapFlow) Run(ctx context.Context) error {
 
 // RenewFlow runs the CronJob side of cert rotation:
 //
-//  1. Load the current keypair from disk (no shortcut — we MUST present the
-//     existing cert to /sign-csr).
+//  1. Read the current cert + key + CA from the Persister.
 //  2. Generate a fresh keypair + CSR.
-//  3. POST to /sign-csr over mTLS.
-//  4. Write the returned leaf + CA atomically.
+//  3. POST to /sign-csr over mTLS using the OLD cert.
+//  4. Persist the returned leaf + new key + (optional) CA.
 //
 // The running collector picks up the rotated cert at the next outbound TLS
 // handshake via ClientReloader.
 type RenewFlow struct {
-	ClusterID  string
-	TenantID   string
-	BrainURL   string
-	Material   CertMaterial
-	Logger     *zap.Logger
+	ClusterID    string
+	TenantID     string
+	BrainURL     string
+	VendorCAFile string // pre-installed bundle; falls back to ca from Persister
+	Persister    Persister
+	Logger       *zap.Logger
 }
 
 func (r RenewFlow) Run(ctx context.Context) error {
+	if r.Persister == nil {
+		return errors.New("renew: Persister is required")
+	}
 	if r.ClusterID == "" || r.BrainURL == "" {
 		return errors.New("renew: ClusterID and BrainURL are required")
 	}
-	if !r.Material.Exists() {
+
+	exists, err := r.Persister.Exists(ctx)
+	if err != nil {
+		return fmt.Errorf("check existing cert: %w", err)
+	}
+	if !exists {
 		return errors.New("renew: no existing cert; bootstrap must run first")
 	}
 
-	clientCert, err := tls.LoadX509KeyPair(r.Material.CertFile, r.Material.KeyFile)
+	certPEM, keyPEM, caPEM, err := r.Persister.Read(ctx)
 	if err != nil {
-		return fmt.Errorf("load current keypair: %w", err)
+		return fmt.Errorf("read current cert: %w", err)
+	}
+	clientCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return fmt.Errorf("parse current keypair: %w", err)
 	}
 
-	csrPEM, keyPEM, err := GenerateCSR(r.TenantID, r.ClusterID)
+	csrPEM, newKeyPEM, err := GenerateCSR(r.TenantID, r.ClusterID)
 	if err != nil {
 		return fmt.Errorf("generate CSR: %w", err)
 	}
 
-	client, err := NewBrainClient(r.BrainURL, r.Material.CAFile)
+	caFile := r.VendorCAFile
+	if caFile == "" {
+		// Fall back to writing the current CA to a temp file so BrainClient
+		// can read it from a path. Renewal-as-a-CronJob can't always rely on
+		// the vendor CA being mounted separately, so this keeps the flow
+		// self-contained.
+		tmp, err := os.CreateTemp("", "muthur-ca-*.pem")
+		if err != nil {
+			return fmt.Errorf("temp CA file: %w", err)
+		}
+		defer os.Remove(tmp.Name())
+		if _, err := tmp.Write(caPEM); err != nil {
+			tmp.Close()
+			return fmt.Errorf("write temp CA: %w", err)
+		}
+		tmp.Close()
+		caFile = tmp.Name()
+	}
+
+	client, err := NewBrainClient(r.BrainURL, caFile)
 	if err != nil {
 		return fmt.Errorf("brain client: %w", err)
 	}
-	certPEM, caPEM, err := client.Renew(ctx, clientCert, csrPEM)
+	newCertPEM, newCAPEM, err := client.Renew(ctx, clientCert, csrPEM)
 	if err != nil {
 		return fmt.Errorf("renew call: %w", err)
 	}
-	// Allow caPEM to be empty: a renewal that doesn't ship a CA leaves the
-	// existing ca.crt untouched (handled by WriteMaterial). We pass it through
-	// either way to keep behaviour explicit.
-	if err := WriteMaterial(r.Material, certPEM, keyPEM, caPEM); err != nil {
-		return fmt.Errorf("write material: %w", err)
+	if err := r.Persister.Write(ctx, newCertPEM, newKeyPEM, newCAPEM); err != nil {
+		return fmt.Errorf("persist material: %w", err)
 	}
 
 	r.Logger.Info("renewal complete — cert rotated",
-		zap.String("cert_dir", r.Material.Dir),
 		zap.String("cluster_id", r.ClusterID),
 	)
 	return nil

@@ -69,6 +69,11 @@ func runBootstrap() error {
 	}
 	defer logger.Sync()
 
+	persister, err := newPersister(cfg)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -77,8 +82,8 @@ func runBootstrap() error {
 		TenantID:           cfg.TenantID,
 		BrainURL:           cfg.CentralAgentURL,
 		BootstrapTokenFile: cfg.BootstrapTokenFile,
-		CACertFile:         cfg.CACertFile(),
-		Material:           auth.NewMaterial(cfg.CertDir),
+		VendorCAFile:       cfg.VendorCAFile,
+		Persister:          persister,
 		Logger:             logger,
 	}.Run(ctx)
 }
@@ -94,16 +99,33 @@ func runRenew() error {
 	}
 	defer logger.Sync()
 
+	persister, err := newPersister(cfg)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	return auth.RenewFlow{
-		ClusterID: cfg.ClusterID,
-		TenantID:  cfg.TenantID,
-		BrainURL:  cfg.CentralAgentURL,
-		Material:  auth.NewMaterial(cfg.CertDir),
-		Logger:    logger,
+		ClusterID:    cfg.ClusterID,
+		TenantID:     cfg.TenantID,
+		BrainURL:     cfg.CentralAgentURL,
+		VendorCAFile: cfg.VendorCAFile,
+		Persister:    persister,
+		Logger:       logger,
 	}.Run(ctx)
+}
+
+// newPersister picks the right cert-storage backend. In production
+// (POD_NAMESPACE + CERT_SECRET_NAME set) we write to a Kubernetes Secret;
+// the main container then mounts that Secret normally. For local dev or
+// integration tests, the file-backed persister writes to CERT_DIR.
+func newPersister(cfg *config.Config) (auth.Persister, error) {
+	if cfg.Namespace != "" && cfg.CertSecretName != "" {
+		return auth.NewSecretStoreInCluster(cfg.Namespace, cfg.CertSecretName)
+	}
+	return auth.FilePersister{Material: auth.NewMaterial(cfg.CertDir)}, nil
 }
 
 func runServer() error {

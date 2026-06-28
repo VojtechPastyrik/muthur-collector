@@ -1,0 +1,23 @@
+{{- /*
+  Vendor root CA bundle delivered with the chart.
+
+  The bootstrap call has no client cert yet but still verifies the brain,
+  so the collector must trust the vendor root before it can talk to it.
+  This Secret carries that PEM, supplied via values.auth.vendorCABundle
+  (or a dev path, see below). The same bundle is replaced by the brain's
+  CA on first bootstrap (the chain comes back in the response), so this
+  template only needs to seed the trust anchor — it does not need to track
+  rotations.
+*/}}
+{{- if .Values.auth.vendorCABundle }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "muthur-collector.fullname" . }}-vendor-ca
+  labels:
+    {{- include "muthur-collector.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  ca.crt: |
+{{ .Values.auth.vendorCABundle | indent 4 }}
+{{- end }}

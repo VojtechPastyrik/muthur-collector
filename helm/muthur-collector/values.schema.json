@@ -22,6 +22,7 @@
       "type": "object",
       "properties": {
         "clusterId": { "type": "string" },
+        "tenantId": { "type": "string" },
         "lokiEnabled": { "type": "boolean" },
         "lokiUrl": { "type": "string" },
         "lokiLookbackMinutes": { "type": "integer", "minimum": 1 },
@@ -36,6 +37,20 @@
       },
       "required": ["clusterId"]
     },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "vendorCABundle": { "type": "string" },
+        "renewCron": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string" },
+            "resources": { "type": "object" }
+          }
+        }
+      }
+    },
     "externalSecrets": {
       "type": "object",
       "properties": {
@@ -43,7 +58,9 @@
         "secretStoreName": { "type": "string" },
         "secretStoreKind": { "type": "string" },
         "remoteSecretPath": { "type": "string" },
-        "refreshInterval": { "type": "string" }
+        "refreshInterval": { "type": "string" },
+        "centralAgentUrlProperty": { "type": "string" },
+        "bootstrapTokenProperty": { "type": "string" }
       }
     },
     "devSecrets": {
@@ -51,7 +68,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "centralAgentUrl": { "type": "string" },
-        "centralAgentToken": { "type": "string" }
+        "bootstrapToken": { "type": "string" }
       }
     },
     "resources": { "type": "object" }

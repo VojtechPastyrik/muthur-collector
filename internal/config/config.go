@@ -28,12 +28,19 @@ type Config struct {
 
 	// mTLS paths. CertDir holds the collector's leaf cert (tls.crt), its key
 	// (tls.key), and the vendor CA bundle (ca.crt) used to verify the brain.
-	// All three live in a single mounted Secret so cert-manager / the renew
-	// CronJob can swap them atomically. BootstrapTokenFile is a one-shot
-	// secret consumed by the init container; the running collector never
-	// needs to read it.
+	// All three live in a single mounted Secret. BootstrapTokenFile is a
+	// one-shot secret consumed by the init container; the running collector
+	// never needs to read it. VendorCAFile points at the chart-provided
+	// trust root used during the first bootstrap call (before the collector
+	// has its own cert yet).
+	//
+	// CertSecretName + Namespace let the init/renew flows write into a
+	// Kubernetes Secret directly rather than a PVC.
 	CertDir            string
 	BootstrapTokenFile string
+	VendorCAFile       string
+	CertSecretName     string
+	Namespace          string
 }
 
 func Load() (*Config, error) {
@@ -69,6 +76,9 @@ func Load() (*Config, error) {
 
 		CertDir:            envOr("CERT_DIR", "/secrets/tls/collector"),
 		BootstrapTokenFile: envOr("BOOTSTRAP_TOKEN_FILE", "/secrets/bootstrap/token"),
+		VendorCAFile:       envOr("VENDOR_CA_FILE", "/secrets/vendor-ca/ca.crt"),
+		CertSecretName:     os.Getenv("CERT_SECRET_NAME"),
+		Namespace:          os.Getenv("POD_NAMESPACE"),
 	}
 
 	if cfg.ClusterID == "" {

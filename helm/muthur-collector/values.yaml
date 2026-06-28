@@ -19,6 +19,9 @@ serviceMonitor:
 
 config:
   clusterId: cluster-a
+  # tenantId feeds the cert's SPIFFE URI SAN (spiffe://muthur/<tenantId>/<clusterId>).
+  # Leave empty to use a plain CN-only identity — the brain will accept both.
+  tenantId: ""
   # Set lokiEnabled: false on clusters without a logging stack — the collector
   # will still forward alerts, just without redacted log excerpts attached.
   lokiEnabled: true
@@ -45,17 +48,50 @@ config:
   # spawning unbounded goroutines — the AlertManager webhook is never wedged.
   webhookMaxConcurrent: 50
 
+# --- mTLS auth ---
+# The collector enrols with the brain over a one-time bootstrap token
+# (delivered via SOPS-encrypted ExternalSecret) and then talks pure mTLS for
+# /ingest and /sign-csr renewals. The init container persists the issued cert
+# into a Kubernetes Secret managed by this chart (RBAC included).
+auth:
+  # Vendor root CA bundle (PEM) used to verify the brain on the bootstrap
+  # call, before the collector has its own cert. Paste the contents of the
+  # muthur-root-ca-tls.tls.crt the brain chart provisions, OR the public
+  # cert exported from the central cluster after `helm install`.
+  vendorCABundle: ""
+  # CronJob that renews the cert before expiry. Defaults assume a 30-day
+  # cert + 7-day renewBefore: one daily run gives 6 days of recovery
+  # runway after a single missed schedule.
+  renewCron:
+    enabled: true
+    schedule: "30 3 * * *"
+    resources:
+      limits:
+        cpu: 200m
+        memory: 64Mi
+      requests:
+        cpu: 50m
+        memory: 32Mi
+
 externalSecrets:
   enabled: true
   secretStoreName: vault-backend
   secretStoreKind: ClusterSecretStore
   remoteSecretPath: muthur-collector/prod
   refreshInterval: 1h
+  # Property name in the remote secret store that carries the URL of the
+  # brain. Plaintext (not strictly sensitive) but kept here so the collector
+  # chart can be installed without baking in environment-specific values.
+  centralAgentUrlProperty: central-agent-url
+  # Property name of the SHA-256-hashed one-time bootstrap token. After
+  # successful bootstrap the token is invalidated server-side; this remote
+  # entry can be deleted at that point.
+  bootstrapTokenProperty: bootstrap-token
 
 devSecrets:
   enabled: false
   centralAgentUrl: ""
-  centralAgentToken: ""
+  bootstrapToken: ""
 
 resources:
   limits:

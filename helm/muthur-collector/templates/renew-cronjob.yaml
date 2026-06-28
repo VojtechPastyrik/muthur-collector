@@ -1,0 +1,73 @@
+{{- /*
+  Cert rotation CronJob.
+
+  Runs the collector image with `renew` as the entry argument: read the
+  existing cert from the Secret via the K8s API, generate a fresh keypair,
+  POST to /sign-csr over mTLS using the OLD cert, and update the Secret.
+  kubelet propagates the new Secret data to the main pod's mounted volume
+  within seconds; the file-mtime ClientReloader picks it up on the next
+  outbound TLS handshake.
+
+  Schedule defaults to once a day; with a 30-day cert and a 7-day
+  renewBefore window, a single missed schedule still leaves 6 days of
+  runway. Tighten if your cert lifetime is shorter.
+*/}}
+{{- if .Values.auth.renewCron.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "muthur-collector.fullname" . }}-renew
+  labels:
+    {{- include "muthur-collector.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.auth.renewCron.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "muthur-collector.fullname" . }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: renew
+              image: {{ include "muthur-collector.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["renew"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: CERT_SECRET_NAME
+                  value: {{ include "muthur-collector.fullname" . }}-tls
+              envFrom:
+                - configMapRef:
+                    name: {{ include "muthur-collector.fullname" . }}-config
+                - secretRef:
+                    name: {{ include "muthur-collector.fullname" . }}-secret
+              volumeMounts:
+                - name: vendor-ca
+                  mountPath: /secrets/vendor-ca
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.auth.renewCron.resources | nindent 16 }}
+          volumes:
+            - name: vendor-ca
+              secret:
+                secretName: {{ include "muthur-collector.fullname" . }}-vendor-ca
+                defaultMode: 0444
+{{- end }}
