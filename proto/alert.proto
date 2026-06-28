@@ -2,6 +2,26 @@ syntax = "proto3";
 package monitoring.v1;
 option go_package = "github.com/VojtechPastyrik/muthur-collector/proto/v1";
 
+// Brain is the central service collectors talk to over mTLS. Replay protection
+// (timestamp + nonce) is carried via gRPC metadata, not message fields, so the
+// wire shape stays a pure data contract.
+service Brain {
+  // Ingest accepts an alert payload pushed by a collector. Identity comes
+  // from the verified client cert (peer.Peer), not from the request body —
+  // payload.cluster_id is cross-checked against the cert's cluster_id.
+  rpc Ingest(AlertPayload) returns (IngestResponse);
+
+  // BootstrapCert issues the first leaf cert to a collector that has no
+  // prior credentials. Authenticated by a one-time bootstrap token in the
+  // request body; the listener accepts cert-less handshakes for this RPC.
+  rpc BootstrapCert(BootstrapRequest) returns (BootstrapResponse);
+
+  // SignCSR renews a collector's leaf cert. Authenticated by the existing
+  // client cert presented during the mTLS handshake; the CSR contributes
+  // only the new public key.
+  rpc SignCSR(SignCSRRequest) returns (SignCSRResponse);
+}
+
 message AlertPayload {
   string cluster_id    = 1;
   string alert_name    = 2;
@@ -63,4 +83,26 @@ message PodMeta {
 message Label {
   string name  = 1;
   string value = 2;
+}
+
+message IngestResponse {}
+
+message BootstrapRequest {
+  string cluster_id       = 1;
+  string bootstrap_token  = 2;
+  string csr              = 3; // PEM-encoded certificate request
+}
+
+message BootstrapResponse {
+  string certificate = 1; // PEM leaf
+  string ca          = 2; // PEM intermediate CA
+}
+
+message SignCSRRequest {
+  string csr = 1; // PEM
+}
+
+message SignCSRResponse {
+  string certificate = 1; // PEM leaf
+  string ca          = 2; // PEM intermediate CA
 }
