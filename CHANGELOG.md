@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0] — 2026-06-28
+
+### Changed
+
+- **Breaking wire format.** The collector now talks to the brain via
+  gRPC instead of REST. `forwarder` issues `Brain.Ingest`; bootstrap and
+  renew flows issue `Brain.BootstrapCert` and `Brain.SignCSR`. Requires
+  `muthur` chart ≥ 0.8.0; deploy the two in lockstep.
+- Replay protection (timestamp + nonce) now rides on gRPC outgoing
+  metadata (`x-muthur-timestamp`, `x-muthur-nonce`) instead of HTTP
+  headers. Same uniqueness semantics.
+- `CENTRAL_AGENT_URL` can stay as `https://muthur-api…` (the scheme is
+  stripped before dialling) or be set to a bare `host:port`. No `/ingest`
+  suffix — the brain endpoint no longer has a path.
+- Internal retry classification moved from HTTP status codes to gRPC
+  status codes: `Unavailable` / `DeadlineExceeded` retry; everything
+  else (`Unauthenticated`, `PermissionDenied`, `InvalidArgument`,
+  `FailedPrecondition`, `NotFound`, `Unimplemented`) is permanent.
+
 ## [0.7.1] — 2026-06-28
 
 ### Fixed

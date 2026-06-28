@@ -51,8 +51,9 @@ config:
 # --- mTLS auth ---
 # The collector enrols with the brain over a one-time bootstrap token
 # (delivered via SOPS-encrypted ExternalSecret) and then talks pure mTLS for
-# /ingest and /sign-csr renewals. The init container persists the issued cert
-# into a Kubernetes Secret managed by this chart (RBAC included).
+# the gRPC Brain service (Ingest, SignCSR renewals). The init container
+# persists the issued cert into a Kubernetes Secret managed by this chart
+# (RBAC included).
 auth:
   # Vendor root CA bundle (PEM) used to verify the brain on the bootstrap
   # call, before the collector has its own cert. Paste the contents of the
