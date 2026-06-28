@@ -1,44 +1,39 @@
 package auth
 
 import (
-	"crypto/rand"
 	"encoding/hex"
-	"net/http"
-	"strconv"
-	"time"
+	"math/rand/v2"
 )
 
-// Replay-protection headers. Mirrored from the brain side; this collector
-// emits both on every call to /ingest and /sign-csr so the brain's
-// ReplayGuard accepts the request as fresh and single-use.
-const (
-	HeaderTimestamp = "X-Muthur-Timestamp"
-	HeaderNonce     = "X-Muthur-Nonce"
-)
-
-// stampReplayHeaders attaches a current Unix timestamp and a fresh 128-bit
-// hex nonce to req. Used by every outbound request that the brain
-// replay-protects (/ingest, /sign-csr — /bootstrap-cert ignores them but
-// receives them too so the call shape is uniform).
+// Replay-protection metadata keys. The collector attaches both on every gRPC
+// call that the brain replay-protects (Ingest, SignCSR — BootstrapCert
+// ignores them but receives them too so the call shape stays uniform).
 //
-// Any error during random generation falls back to a time-derived nonce.
-// The fallback is strictly worse than a real random nonce but it is still
-// monotonic enough that practical replay protection holds: the brain's
-// single-use marker rejects a second occurrence.
-func stampReplayHeaders(req *http.Request) {
-	req.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
-	req.Header.Set(HeaderNonce, freshNonce())
-}
+// Mirrors the brain side's lowercased gRPC metadata names.
+const (
+	MetaTimestamp = "x-muthur-timestamp"
+	MetaNonce     = "x-muthur-nonce"
+)
 
-func freshNonce() string {
+// FreshNonce returns a 32-hex-char random nonce. math/rand/v2 seeds itself
+// from crypto/rand and is plenty for replay protection, where uniqueness —
+// not unpredictability — is the load-bearing property.
+func FreshNonce() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// Last-resort fallback: time-based bytes. Worse entropy but the
-		// brain's nonce cache still rejects exact repeats within the window.
-		now := time.Now().UnixNano()
-		for i := 0; i < len(b); i++ {
-			b[i] = byte(now >> (i % 8 * 8))
-		}
+	for i := range b {
+		b[i] = byte(rand.Uint32())
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// StripScheme normalises a configured brain URL to a bare host:port target.
+// gRPC dial targets are scheme-less; the chart historically used
+// https://muthur-api.example.com and we accept either form.
+func StripScheme(s string) string {
+	for _, prefix := range []string{"https://", "http://", "grpcs://", "grpc://"} {
+		if len(s) > len(prefix) && s[:len(prefix)] == prefix {
+			return s[len(prefix):]
+		}
+	}
+	return s
 }

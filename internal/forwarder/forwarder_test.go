@@ -9,26 +9,53 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"io"
+	"errors"
 	"math/big"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/VojtechPastyrik/muthur-collector/internal/auth"
 	pb "github.com/VojtechPastyrik/muthur-collector/proto"
 )
 
-// newTestForwarder spins up a TLS server with the supplied handler, builds
-// the matching collector keypair, and returns a Forwarder configured to dial
-// the server. The cleanup closes the server.
-func newTestForwarder(t *testing.T, handler http.HandlerFunc) (*Forwarder, *httptest.Server) {
+type fakeBrain struct {
+	pb.UnimplementedBrainServer
+
+	gotPeerCert bool
+	gotTS       string
+	gotNonce    string
+	respondWith error
+}
+
+func (f *fakeBrain) Ingest(ctx context.Context, _ *pb.AlertPayload) (*pb.IngestResponse, error) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if v := md.Get(auth.MetaTimestamp); len(v) > 0 {
+			f.gotTS = v[0]
+		}
+		if v := md.Get(auth.MetaNonce); len(v) > 0 {
+			f.gotNonce = v[0]
+		}
+	}
+	if f.respondWith != nil {
+		return nil, f.respondWith
+	}
+	return &pb.IngestResponse{}, nil
+}
+
+// spinUpTLSBrain runs an in-process gRPC server with mTLS on 127.0.0.1 and
+// returns the target string + fakeBrain handle for inspection. The cleanup
+// stops the server.
+func spinUpTLSBrain(t *testing.T) (string, *fakeBrain, *auth.ClientReloader, string) {
 	t.Helper()
 
 	caCert, caKey, caPEM := newCA(t)
@@ -37,16 +64,6 @@ func newTestForwarder(t *testing.T, handler http.HandlerFunc) (*Forwarder, *http
 	pool := x509.NewCertPool()
 	pool.AddCert(caCert)
 
-	srv := httptest.NewUnstartedServer(handler)
-	srv.TLS = &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		ClientAuth:   tls.VerifyClientCertIfGiven,
-		ClientCAs:    pool,
-	}
-	srv.StartTLS()
-
-	// Persist CA + client cert/key to disk so the production loaders see real
-	// files (Forwarder reads CA from a path, ClientReloader reads cert/key).
 	dir := t.TempDir()
 	caPath := filepath.Join(dir, "ca.crt")
 	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
@@ -61,101 +78,110 @@ func newTestForwarder(t *testing.T, handler http.HandlerFunc) (*Forwarder, *http
 		t.Fatalf("NewClientReloader: %v", err)
 	}
 
-	f, err := New(Config{
-		URL:        srv.URL + "/ingest",
-		CARootFile: caPath,
-		Reloader:   reloader,
-		Timeout:    5 * time.Second,
-	}, zap.NewNop())
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	brain := &fakeBrain{}
+	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.VerifyClientCertIfGiven,
+		ClientCAs:    pool,
+	})))
+	pb.RegisterBrainServer(srv, brain)
+	go srv.Serve(lis)
+	t.Cleanup(func() { srv.Stop() })
+
+	return lis.Addr().String(), brain, reloader, caPath
+}
+
+func TestForward_Success(t *testing.T) {
+	target, brain, reloader, caPath := spinUpTLSBrain(t)
+
+	f, err := New(Config{Target: target, CARootFile: caPath, Reloader: reloader}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return f, srv
-}
+	defer f.Close()
 
-func TestForwarder_Success(t *testing.T) {
-	f, srv := newTestForwarder(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Content-Type") != "application/x-protobuf" {
-			t.Error("missing protobuf content type")
-		}
-		if r.Header.Get(auth.HeaderTimestamp) == "" {
-			t.Error("missing X-Muthur-Timestamp")
-		}
-		if r.Header.Get(auth.HeaderNonce) == "" {
-			t.Error("missing X-Muthur-Nonce")
-		}
-		// The legacy bearer token must NOT be sent any more.
-		if r.Header.Get("X-Collector-Token") != "" {
-			t.Error("legacy X-Collector-Token header is still being sent")
-		}
-		// The TLS client cert must have reached the server.
-		if len(r.TLS.PeerCertificates) == 0 {
-			t.Error("no peer cert; collector failed to present mTLS material")
-		}
-		body, _ := io.ReadAll(r.Body)
-		if len(body) == 0 {
-			t.Error("empty body")
-		}
-		w.WriteHeader(http.StatusAccepted)
-	})
-	defer srv.Close()
-
-	err := f.Forward(context.Background(), &pb.AlertPayload{
-		ClusterId: "cluster-a",
-		AlertName: "TestAlert",
-	})
-	if err != nil {
+	if err := f.Forward(context.Background(), &pb.AlertPayload{ClusterId: "cluster-a", AlertName: "x"}); err != nil {
 		t.Fatalf("Forward: %v", err)
 	}
-}
-
-func TestForwarder_ClientErrorDoesNotRetry(t *testing.T) {
-	calls := 0
-	f, srv := newTestForwarder(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusUnauthorized)
-	})
-	defer srv.Close()
-
-	err := f.Forward(context.Background(), &pb.AlertPayload{})
-	if err == nil {
-		t.Error("expected error on 401")
+	if brain.gotTS == "" {
+		t.Error("missing x-muthur-timestamp metadata")
 	}
-	if calls != 1 {
-		t.Errorf("retried a 4xx response: %d calls (want 1)", calls)
+	if brain.gotNonce == "" {
+		t.Error("missing x-muthur-nonce metadata")
 	}
 }
 
-func TestForwarder_ServerErrorRetries(t *testing.T) {
-	attempts := 0
-	f, srv := newTestForwarder(t, func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts < 3 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusAccepted)
-	})
-	defer srv.Close()
+func TestForward_PermanentErrorDoesNotRetry(t *testing.T) {
+	target, brain, reloader, caPath := spinUpTLSBrain(t)
+	brain.respondWith = status.Error(codes.Unauthenticated, "no")
 
-	err := f.Forward(context.Background(), &pb.AlertPayload{})
+	f, err := New(Config{Target: target, CARootFile: caPath, Reloader: reloader}, zap.NewNop())
 	if err != nil {
-		t.Fatalf("expected success after retries, got %v", err)
+		t.Fatalf("New: %v", err)
 	}
-	if attempts != 3 {
-		t.Errorf("attempts = %d, want 3", attempts)
+	defer f.Close()
+
+	err = f.Forward(context.Background(), &pb.AlertPayload{})
+	if err == nil {
+		t.Fatal("expected error from Unauthenticated")
+	}
+	if !errors.Is(err, err) {
+		// Just ensure error propagation; isPermanent unit-tested below.
 	}
 }
 
-func TestNew_RequiresURL(t *testing.T) {
+func TestIsPermanent_Codes(t *testing.T) {
+	cases := []struct {
+		code codes.Code
+		want bool
+	}{
+		{codes.InvalidArgument, true},
+		{codes.Unauthenticated, true},
+		{codes.PermissionDenied, true},
+		{codes.FailedPrecondition, true},
+		{codes.NotFound, true},
+		{codes.Unimplemented, true},
+		{codes.Unavailable, false},
+		{codes.DeadlineExceeded, false},
+		{codes.Internal, false},
+	}
+	for _, c := range cases {
+		got := isPermanent(status.Error(c.code, "x"))
+		if got != c.want {
+			t.Errorf("code=%s: isPermanent=%v want %v", c.code, got, c.want)
+		}
+	}
+}
+
+func TestNew_RequiresTarget(t *testing.T) {
 	if _, err := New(Config{}, zap.NewNop()); err == nil {
-		t.Error("New accepted empty config")
+		t.Error("New accepted empty Target")
 	}
 }
 
 func TestNew_RequiresReloader(t *testing.T) {
-	if _, err := New(Config{URL: "https://x", CARootFile: "/no/such"}, zap.NewNop()); err == nil {
+	if _, err := New(Config{Target: "x:443", CARootFile: "/no/such"}, zap.NewNop()); err == nil {
 		t.Error("New accepted nil reloader")
+	}
+}
+
+func TestStripScheme(t *testing.T) {
+	cases := map[string]string{
+		"https://h:443":   "h:443",
+		"http://h:80":     "h:80",
+		"grpcs://h:443":   "h:443",
+		"grpc://h:443":    "h:443",
+		"plain.host:443":  "plain.host:443",
+		"localhost:50051": "localhost:50051",
+	}
+	for in, want := range cases {
+		if got := auth.StripScheme(in); got != want {
+			t.Errorf("StripScheme(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

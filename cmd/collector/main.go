@@ -167,13 +167,14 @@ func runServer() error {
 	}
 
 	fwd, err := forwarder.New(forwarder.Config{
-		URL:        cfg.CentralAgentURL + "/ingest",
+		Target:     cfg.CentralAgentURL,
 		CARootFile: cfg.CACertFile(),
 		Reloader:   reloader,
 	}, logger)
 	if err != nil {
 		return fmt.Errorf("init forwarder: %w", err)
 	}
+	defer fwd.Close()
 	res := resolver.New(k8sClient, logger)
 	pipe := pipeline.New(cfg.ClusterID, cfg.GrafanaBaseURL, res, lokiClient, promClient, k8sClient, redactor, fwd, logger)
 

@@ -1,44 +1,45 @@
 package forwarder
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"math/rand/v2"
-	"net/http"
 	"os"
 	"strconv"
 	"time"
 
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/VojtechPastyrik/muthur-collector/internal/auth"
 	"github.com/VojtechPastyrik/muthur-collector/internal/metrics"
 	pb "github.com/VojtechPastyrik/muthur-collector/proto"
 )
 
-// Forwarder ships marshalled AlertPayloads to the brain over mTLS. The client
-// cert is sourced through ClientReloader so cert-manager / the renew CronJob
-// can rotate the keypair without restarting the collector. The vendor root CA
-// authenticates the brain.
+// Forwarder ships AlertPayloads to the brain over the gRPC Brain.Ingest RPC.
+// The mTLS client cert is sourced through ClientReloader so cert-manager / the
+// renew CronJob can rotate the keypair without restarting the collector. The
+// vendor root CA authenticates the brain.
 type Forwarder struct {
-	url    string
-	client *http.Client
+	conn   *grpc.ClientConn
+	client pb.BrainClient
 	logger *zap.Logger
 }
 
-// Config bundles the inputs Forwarder needs to wire its TLS transport.
+// Config bundles the inputs Forwarder needs to wire its gRPC transport.
 type Config struct {
-	URL          string
-	CARootFile   string
-	Reloader     *auth.ClientReloader
-	Timeout      time.Duration
+	// Target is the brain's gRPC endpoint as host:port. URLs with a scheme
+	// (https://, grpcs://) are accepted and the scheme is stripped.
+	Target     string
+	CARootFile string
+	Reloader   *auth.ClientReloader
+	Timeout    time.Duration
 }
 
 // New constructs a Forwarder. Returns an error if the root CA file cannot be
@@ -46,8 +47,8 @@ type Config struct {
 // trust anchor, so failing fast at startup is preferable to dialling without
 // verification.
 func New(cfg Config, logger *zap.Logger) (*Forwarder, error) {
-	if cfg.URL == "" {
-		return nil, errors.New("forwarder: URL is required")
+	if cfg.Target == "" {
+		return nil, errors.New("forwarder: Target is required")
 	}
 	if cfg.Reloader == nil {
 		return nil, errors.New("forwarder: ClientReloader is required")
@@ -56,24 +57,30 @@ func New(cfg Config, logger *zap.Logger) (*Forwarder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("forwarder: %w", err)
 	}
-	timeout := cfg.Timeout
-	if timeout <= 0 {
-		timeout = 15 * time.Second
+	target := auth.StripScheme(cfg.Target)
+
+	creds := credentials.NewTLS(&tls.Config{
+		MinVersion:           tls.VersionTLS12,
+		RootCAs:              pool,
+		GetClientCertificate: cfg.Reloader.GetClientCertificate,
+	})
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
+	if err != nil {
+		return nil, fmt.Errorf("forwarder: dial: %w", err)
 	}
 	return &Forwarder{
-		url: cfg.URL,
-		client: &http.Client{
-			Timeout: timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					MinVersion:           tls.VersionTLS12,
-					RootCAs:              pool,
-					GetClientCertificate: cfg.Reloader.GetClientCertificate,
-				},
-			},
-		},
+		conn:   conn,
+		client: pb.NewBrainClient(conn),
 		logger: logger,
 	}, nil
+}
+
+// Close releases the underlying gRPC connection. Safe to call once at shutdown.
+func (f *Forwarder) Close() error {
+	if f.conn == nil {
+		return nil
+	}
+	return f.conn.Close()
 }
 
 func loadCAPool(path string) (*x509.CertPool, error) {
@@ -91,19 +98,14 @@ func loadCAPool(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// Forward marshals the payload and POSTs it to the brain's /ingest. Retries
-// transient (5xx / network) errors with exponential backoff up to 3 attempts.
-// 4xx responses are treated as permanent — they typically mean the brain
-// rejected the cert identity binding, which a retry will not fix.
+// Forward issues the gRPC Ingest call. Retries transient (Unavailable /
+// DeadlineExceeded) failures with exponential backoff up to 3 attempts.
+// InvalidArgument / Unauthenticated / PermissionDenied are treated as
+// permanent — they typically mean the brain rejected the cert identity
+// binding or replay metadata, which a retry will not fix.
 func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error {
 	start := time.Now()
 	defer func() { metrics.ForwardDuration.Observe(time.Since(start).Seconds()) }()
-
-	data, err := proto.Marshal(payload)
-	if err != nil {
-		metrics.Forwards.WithLabelValues("error").Inc()
-		return fmt.Errorf("marshal protobuf: %w", err)
-	}
 
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -114,8 +116,6 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 				zap.Int("attempt", attempt+1),
 				zap.Duration("backoff", backoff),
 			)
-			// Honour cancellation during backoff so a shutdown or deadline
-			// doesn't get stuck sleeping on a dead central.
 			select {
 			case <-ctx.Done():
 				metrics.Forwards.WithLabelValues("error").Inc()
@@ -124,7 +124,7 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 			}
 		}
 
-		err := f.send(ctx, data)
+		err := f.send(ctx, payload)
 		if err == nil {
 			metrics.Forwards.WithLabelValues("ok").Inc()
 			return nil
@@ -134,8 +134,6 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 			zap.Int("attempt", attempt+1),
 			zap.Error(err),
 		)
-		// 4xx is permanent: the brain rejected us by identity, replay, or
-		// proto. Retrying won't change the answer.
 		if isPermanent(err) {
 			break
 		}
@@ -145,52 +143,27 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 	return fmt.Errorf("forward failed: %w", lastErr)
 }
 
-// permanentError is the sentinel that isPermanent detects to short-circuit
-// retries on the brain's 4xx responses.
-type permanentError struct{ inner error }
-
-func (p *permanentError) Error() string { return p.inner.Error() }
-func (p *permanentError) Unwrap() error { return p.inner }
-
-func isPermanent(err error) bool {
-	var p *permanentError
-	return errors.As(err, &p)
-}
-
-func (f *Forwarder) send(ctx context.Context, data []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.url, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/x-protobuf")
-	req.Header.Set("X-Muthur-Timestamp", strconv.FormatInt(time.Now().Unix(), 10))
-	req.Header.Set("X-Muthur-Nonce", freshNonce())
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode >= 500 {
-		return fmt.Errorf("server error: %d", resp.StatusCode)
-	}
-	if resp.StatusCode >= 400 {
-		return &permanentError{inner: fmt.Errorf("client error: %d (not retryable)", resp.StatusCode)}
+func (f *Forwarder) send(ctx context.Context, payload *pb.AlertPayload) error {
+	ctx = metadata.AppendToOutgoingContext(ctx,
+		auth.MetaTimestamp, strconv.FormatInt(time.Now().Unix(), 10),
+		auth.MetaNonce, auth.FreshNonce(),
+	)
+	if _, err := f.client.Ingest(ctx, payload); err != nil {
+		return err
 	}
 	return nil
 }
 
-// freshNonce returns a 32-hex-char random nonce. crypto/rand would be the
-// ideal source but math/rand/v2 already seeds from crypto/rand and is plenty
-// for replay protection where uniqueness — not unpredictability — is the
-// load-bearing property.
-func freshNonce() string {
-	var b [16]byte
-	for i := range b {
-		b[i] = byte(rand.Uint32())
+// isPermanent reports whether the gRPC error should short-circuit retries.
+// Server-side rejections (auth, replay, identity binding, malformed payload)
+// are all permanent — a retry without operator intervention will not change
+// the answer.
+func isPermanent(err error) bool {
+	switch status.Code(err) {
+	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied,
+		codes.FailedPrecondition, codes.NotFound, codes.Unimplemented:
+		return true
 	}
-	return hex.EncodeToString(b[:])
+	return false
 }
+
