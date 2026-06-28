@@ -21,6 +21,11 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+        # fsGroup makes kubelet chgrp mounted Secret files so the non-root
+        # user can read them. Without it, the bootstrap init container hits
+        # "permission denied: /secrets/bootstrap/token" and the pod never
+        # gets past init.
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       initContainers:

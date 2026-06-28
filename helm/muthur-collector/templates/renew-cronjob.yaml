@@ -35,6 +35,9 @@ spec:
             runAsNonRoot: true
             runAsUser: 65532
             runAsGroup: 65532
+            # See deployment.yaml comment — fsGroup lets the non-root user
+            # read the mounted vendor-ca Secret.
+            fsGroup: 65532
             seccompProfile:
               type: RuntimeDefault
           containers:

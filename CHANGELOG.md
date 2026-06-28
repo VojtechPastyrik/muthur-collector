@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.1] — 2026-06-28
+
+### Fixed
+
+- Add `fsGroup: 65532` to the collector pod's and renew CronJob's
+  security contexts. Without it, kubelet kept the mounted Secret files
+  at root:root, and the bootstrap init container (uid 65532) failed
+  with:
+
+      error: read bootstrap token: open /secrets/bootstrap/token: permission denied
+
+  fsGroup triggers kubelet to chgrp every mounted Secret/ConfigMap
+  file to the supplied gid before the container starts, which makes
+  the bootstrap token and vendor CA readable to the collector user
+  without weakening the mode bits or running as root.
+
 ## [0.7.0] — 2026-06-28
 
 Theme: the collector now talks to the brain over mutual TLS. The
