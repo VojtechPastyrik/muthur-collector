@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a bug in MUTHUR collector
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please redact any secrets / customer data before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Collector version
+      placeholder: "v0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: k8s
+    attributes:
+      label: Kubernetes version
+      placeholder: "v1.31.0 (k3s / kubeadm / EKS / ...)"
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Enrichment source involved
+      options:
+        - Loki
+        - Prometheus
+        - AlertManager ingest
+        - Multiple / unsure
+        - None
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Deploy collector with values ...
+        2. Trigger alert ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Collector logs at startup + at failure. Redact secrets.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues
+          required: true
+        - label: I redacted secrets and customer data
+          required: true
