@@ -8,8 +8,8 @@ import (
 
 type Config struct {
 	ClusterID             string
+	TenantID              string
 	CentralAgentURL       string
-	CentralAgentToken     string
 	LokiEnabled           bool
 	LokiURL               string
 	LokiLookbackMinutes   int
@@ -25,6 +25,15 @@ type Config struct {
 	WebhookMaxConcurrent  int
 	Port                  string
 	LogLevel              string
+
+	// mTLS paths. CertDir holds the collector's leaf cert (tls.crt), its key
+	// (tls.key), and the vendor CA bundle (ca.crt) used to verify the brain.
+	// All three live in a single mounted Secret so cert-manager / the renew
+	// CronJob can swap them atomically. BootstrapTokenFile is a one-shot
+	// secret consumed by the init container; the running collector never
+	// needs to read it.
+	CertDir            string
+	BootstrapTokenFile string
 }
 
 func Load() (*Config, error) {
@@ -40,8 +49,8 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		ClusterID:             os.Getenv("CLUSTER_ID"),
+		TenantID:              os.Getenv("TENANT_ID"),
 		CentralAgentURL:       os.Getenv("CENTRAL_AGENT_URL"),
-		CentralAgentToken:     os.Getenv("CENTRAL_AGENT_TOKEN"),
 		LokiEnabled:           lokiEnabled,
 		LokiURL:               envOr("LOKI_URL", "http://loki.monitoring.svc:3100"),
 		LokiLookbackMinutes:   lokiLookback,
@@ -57,6 +66,9 @@ func Load() (*Config, error) {
 		WebhookMaxConcurrent:  webhookMaxConcurrent,
 		Port:                  envOr("PORT", "8080"),
 		LogLevel:              envOr("LOG_LEVEL", "info"),
+
+		CertDir:            envOr("CERT_DIR", "/secrets/tls/collector"),
+		BootstrapTokenFile: envOr("BOOTSTRAP_TOKEN_FILE", "/secrets/bootstrap/token"),
 	}
 
 	if cfg.ClusterID == "" {
@@ -64,9 +76,6 @@ func Load() (*Config, error) {
 	}
 	if cfg.CentralAgentURL == "" {
 		return nil, fmt.Errorf("CENTRAL_AGENT_URL is required")
-	}
-	if cfg.CentralAgentToken == "" {
-		return nil, fmt.Errorf("CENTRAL_AGENT_TOKEN is required")
 	}
 
 	return cfg, nil
@@ -78,3 +87,13 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
+
+// CACertFile returns the path to the vendor CA bundle inside CertDir. Used by
+// the forwarder + bootstrap/renew clients to verify the brain.
+func (c *Config) CACertFile() string { return c.CertDir + "/ca.crt" }
+
+// CertFile returns the path to the collector's leaf cert inside CertDir.
+func (c *Config) CertFile() string { return c.CertDir + "/tls.crt" }
+
+// KeyFile returns the path to the collector's private key inside CertDir.
+func (c *Config) KeyFile() string { return c.CertDir + "/tls.key" }

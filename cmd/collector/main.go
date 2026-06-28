@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -11,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/VojtechPastyrik/muthur-collector/internal/auth"
 	"github.com/VojtechPastyrik/muthur-collector/internal/config"
 	"github.com/VojtechPastyrik/muthur-collector/internal/forwarder"
 	"github.com/VojtechPastyrik/muthur-collector/internal/k8s"
@@ -23,18 +26,91 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := dispatch(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// dispatch reads the operating mode from os.Args[1] (or MODE env) and routes
+// to the matching entry point. The default ("serve") runs the main forwarder
+// loop. "bootstrap" and "renew" are one-shot subcommands the chart wires into
+// an initContainer and a CronJob respectively.
+//
+// A single binary keeps the chart simple — one image, three commands.
+func dispatch() error {
+	mode := "serve"
+	if len(os.Args) > 1 && os.Args[1] != "" {
+		mode = os.Args[1]
+	} else if v := os.Getenv("MODE"); v != "" {
+		mode = v
+	}
+
+	switch mode {
+	case "serve":
+		return runServer()
+	case "bootstrap":
+		return runBootstrap()
+	case "renew":
+		return runRenew()
+	default:
+		return fmt.Errorf("unknown mode %q (want serve|bootstrap|renew)", mode)
+	}
+}
+
+func runBootstrap() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	logger, err := newLogger(cfg.LogLevel)
+	if err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
+	defer logger.Sync()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return auth.BootstrapFlow{
+		ClusterID:          cfg.ClusterID,
+		TenantID:           cfg.TenantID,
+		BrainURL:           cfg.CentralAgentURL,
+		BootstrapTokenFile: cfg.BootstrapTokenFile,
+		CACertFile:         cfg.CACertFile(),
+		Material:           auth.NewMaterial(cfg.CertDir),
+		Logger:             logger,
+	}.Run(ctx)
+}
+
+func runRenew() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	logger, err := newLogger(cfg.LogLevel)
+	if err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
+	defer logger.Sync()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return auth.RenewFlow{
+		ClusterID: cfg.ClusterID,
+		TenantID:  cfg.TenantID,
+		BrainURL:  cfg.CentralAgentURL,
+		Material:  auth.NewMaterial(cfg.CertDir),
+		Logger:    logger,
+	}.Run(ctx)
+}
+
+func runServer() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 	logger, err := newLogger(cfg.LogLevel)
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
@@ -42,8 +118,7 @@ func run() error {
 	defer logger.Sync()
 
 	// K8s client (optional — may fail outside cluster)
-	var k8sClient *k8s.Client
-	k8sClient, err = k8s.NewClient(logger)
+	k8sClient, err := k8s.NewClient(logger)
 	if err != nil {
 		logger.Warn("K8s client unavailable, running without pod metadata", zap.Error(err))
 		k8sClient = nil
@@ -60,9 +135,24 @@ func run() error {
 	}
 	promClient := prometheus.NewClient(cfg.PrometheusURL, cfg.PrometheusLookbackMin, cfg.PrometheusEnabled, logger)
 	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, cfg.RedactMaxLineBytes, cfg.RedactMaxTotalBytes, logger)
-	fwd := forwarder.New(cfg.CentralAgentURL, cfg.CentralAgentToken, logger)
-	res := resolver.New(k8sClient, logger)
 
+	// mTLS keypair is hot-reloaded from the mounted Secret. The renew CronJob
+	// writes a fresh cert before expiry; the reloader picks it up on the next
+	// outbound handshake, no restart required.
+	reloader, err := auth.NewClientReloader(cfg.CertFile(), cfg.KeyFile())
+	if err != nil {
+		return fmt.Errorf("load client cert (bootstrap not run?): %w", err)
+	}
+
+	fwd, err := forwarder.New(forwarder.Config{
+		URL:        cfg.CentralAgentURL + "/ingest",
+		CARootFile: cfg.CACertFile(),
+		Reloader:   reloader,
+	}, logger)
+	if err != nil {
+		return fmt.Errorf("init forwarder: %w", err)
+	}
+	res := resolver.New(k8sClient, logger)
 	pipe := pipeline.New(cfg.ClusterID, cfg.GrafanaBaseURL, res, lokiClient, promClient, k8sClient, redactor, fwd, logger)
 
 	// HTTP server
@@ -81,7 +171,7 @@ func run() error {
 	})
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
-	logger.Info("starting muthur-collector",
+	logger.Info("starting muthur-collector (mTLS)",
 		zap.String("addr", addr),
 		zap.String("cluster_id", cfg.ClusterID),
 	)
