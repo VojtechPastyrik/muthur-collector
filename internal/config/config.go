@@ -22,6 +22,7 @@ type Config struct {
 	RedactLogStats        bool
 	RedactMaxLineBytes    int
 	RedactMaxTotalBytes   int
+	RedactMaxStringBytes  int
 	WebhookMaxConcurrent  int
 	Port                  string
 	LogLevel              string
@@ -52,6 +53,7 @@ func Load() (*Config, error) {
 	redactStats, _ := strconv.ParseBool(envOr("REDACT_LOG_STATS", "true"))
 	redactMaxLineBytes, _ := strconv.Atoi(envOr("REDACT_MAX_LINE_BYTES", "8192"))
 	redactMaxTotalBytes, _ := strconv.Atoi(envOr("REDACT_MAX_TOTAL_BYTES", "262144"))
+	redactMaxStringBytes, _ := strconv.Atoi(envOr("REDACT_MAX_STRING_BYTES", "16384"))
 	webhookMaxConcurrent, _ := strconv.Atoi(envOr("WEBHOOK_MAX_CONCURRENT", "50"))
 
 	cfg := &Config{
@@ -70,6 +72,7 @@ func Load() (*Config, error) {
 		RedactLogStats:        redactStats,
 		RedactMaxLineBytes:    redactMaxLineBytes,
 		RedactMaxTotalBytes:   redactMaxTotalBytes,
+		RedactMaxStringBytes:  redactMaxStringBytes,
 		WebhookMaxConcurrent:  webhookMaxConcurrent,
 		Port:                  envOr("PORT", "8080"),
 		LogLevel:              envOr("LOG_LEVEL", "info"),

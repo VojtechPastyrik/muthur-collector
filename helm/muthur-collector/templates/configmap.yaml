@@ -20,6 +20,7 @@ data:
   REDACT_EXTRA_PATTERNS: {{ .Values.config.redactExtraPatterns | quote }}
   REDACT_MAX_LINE_BYTES: {{ .Values.config.redactMaxLineBytes | quote }}
   REDACT_MAX_TOTAL_BYTES: {{ .Values.config.redactMaxTotalBytes | quote }}
+  REDACT_MAX_STRING_BYTES: {{ .Values.config.redactMaxStringBytes | quote }}
   WEBHOOK_MAX_CONCURRENT: {{ .Values.config.webhookMaxConcurrent | quote }}
   PORT: "8080"
   # mTLS paths (matching the chart's volume mounts).

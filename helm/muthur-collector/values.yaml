@@ -43,6 +43,11 @@ config:
   # dropped. Bounds both PII-leak risk and the downstream LLM token bill.
   redactMaxLineBytes: 8192
   redactMaxTotalBytes: 262144
+  # Per-string cap for free-text fields (alert annotations, label values,
+  # metric descriptions). A string over this is replaced with a fail-closed
+  # marker — closes an attacker-controlled-annotation inflation vector that
+  # the per-line cap doesn't cover.
+  redactMaxStringBytes: 16384
   # Max alerts processed concurrently. Under a storm, alerts over this ceiling
   # are dropped (counted in muthur_collector_alerts_dropped_total) instead of
   # spawning unbounded goroutines — the AlertManager webhook is never wedged.

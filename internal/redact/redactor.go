@@ -15,12 +15,13 @@ const (
 	defaultMaxLineBytes  = 8 * 1024   // 8 KiB per line
 	defaultMaxTotalBytes = 256 * 1024 // 256 KiB per payload
 
-	// maxStringBytes caps single non-log strings (Summary, Description, label
-	// values, metric descriptions). AlertManager and Prometheus payloads bound
-	// these to a few KB in normal use; the guard exists for an attacker who
-	// controls an annotation and ships a multi-MB blob to outweigh the regex
-	// engine. Fail-closed marker is returned instead of forwarding raw.
-	maxStringBytes = 16 * 1024 // 16 KiB per string field
+	// defaultMaxStringBytes caps single non-log strings (Summary, Description,
+	// label values, metric descriptions). AlertManager and Prometheus payloads
+	// bound these to a few KB in normal use; the guard exists for an attacker
+	// who controls an annotation and ships a multi-MB blob to outweigh the
+	// regex engine. Fail-closed marker is returned instead of forwarding raw.
+	// Tunable via REDACT_MAX_STRING_BYTES; non-positive values fall back here.
+	defaultMaxStringBytes = 16 * 1024 // 16 KiB per string field
 )
 
 // droppedStringMarker replaces a free-text string that exceeds maxStringBytes.
@@ -41,18 +42,21 @@ type Stats struct {
 }
 
 type Redactor struct {
-	patterns      []pattern
-	maxLineBytes  int
-	maxTotalBytes int
-	logStats      bool
-	logger        *zap.Logger
+	patterns       []pattern
+	maxLineBytes   int
+	maxTotalBytes  int
+	maxStringBytes int
+	logStats       bool
+	logger         *zap.Logger
 }
 
 // New builds a Redactor. maxLineBytes caps an individual log line; maxTotalBytes
-// caps the cumulative redacted payload. A non-positive value falls back to the
-// safe default — the guards can be tuned but never disabled, because forwarding
-// an unbounded line means trusting regex coverage on text we cannot inspect.
-func New(extraPatterns string, logStats bool, maxLineBytes, maxTotalBytes int, logger *zap.Logger) *Redactor {
+// caps the cumulative redacted payload; maxStringBytes caps a single non-log
+// free-text field (annotation, label value, metric description). A non-positive
+// value falls back to the safe default — the guards can be tuned but never
+// disabled, because forwarding an unbounded line means trusting regex coverage
+// on text we cannot inspect.
+func New(extraPatterns string, logStats bool, maxLineBytes, maxTotalBytes, maxStringBytes int, logger *zap.Logger) *Redactor {
 	patterns := make([]pattern, len(builtinPatterns))
 	copy(patterns, builtinPatterns)
 
@@ -65,20 +69,25 @@ func New(extraPatterns string, logStats bool, maxLineBytes, maxTotalBytes int, l
 	if maxTotalBytes <= 0 {
 		maxTotalBytes = defaultMaxTotalBytes
 	}
+	if maxStringBytes <= 0 {
+		maxStringBytes = defaultMaxStringBytes
+	}
 
 	logger.Info("initialized redactor",
 		zap.Int("builtin_patterns", len(builtinPatterns)),
 		zap.Int("custom_patterns", len(extra)),
 		zap.Int("max_line_bytes", maxLineBytes),
 		zap.Int("max_total_bytes", maxTotalBytes),
+		zap.Int("max_string_bytes", maxStringBytes),
 	)
 
 	return &Redactor{
-		patterns:      patterns,
-		maxLineBytes:  maxLineBytes,
-		maxTotalBytes: maxTotalBytes,
-		logStats:      logStats,
-		logger:        logger,
+		patterns:       patterns,
+		maxLineBytes:   maxLineBytes,
+		maxTotalBytes:  maxTotalBytes,
+		maxStringBytes: maxStringBytes,
+		logStats:       logStats,
+		logger:         logger,
 	}
 }
 
@@ -145,7 +154,7 @@ func (r *Redactor) RedactString(s string) string {
 	if s == "" {
 		return s
 	}
-	if len(s) > maxStringBytes {
+	if len(s) > r.maxStringBytes {
 		metrics.LinesDropped.WithLabelValues("oversize-string").Inc()
 		return droppedStringMarker
 	}

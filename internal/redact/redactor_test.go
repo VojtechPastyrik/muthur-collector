@@ -8,7 +8,7 @@ import (
 )
 
 func TestRedact_Email(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"user logged in as admin@example.com from localhost"}
 	result, stats := r.Redact(lines)
 
@@ -24,7 +24,7 @@ func TestRedact_Email(t *testing.T) {
 }
 
 func TestRedact_Phone(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"contact: +1 (555) 123-4567"}
 	result, _ := r.Redact(lines)
 
@@ -34,7 +34,7 @@ func TestRedact_Phone(t *testing.T) {
 }
 
 func TestRedact_SSN(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"SSN: 123-45-6789"}
 	result, _ := r.Redact(lines)
 
@@ -44,7 +44,7 @@ func TestRedact_SSN(t *testing.T) {
 }
 
 func TestRedact_IPv4(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"connection from 192.168.1.100 established"}
 	result, _ := r.Redact(lines)
 
@@ -54,7 +54,7 @@ func TestRedact_IPv4(t *testing.T) {
 }
 
 func TestRedact_BearerToken(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123"}
 	result, _ := r.Redact(lines)
 
@@ -64,7 +64,7 @@ func TestRedact_BearerToken(t *testing.T) {
 }
 
 func TestRedact_JWT(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"}
 	result, _ := r.Redact(lines)
 
@@ -74,7 +74,7 @@ func TestRedact_JWT(t *testing.T) {
 }
 
 func TestRedact_AWSKey(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"key=AKIAIOSFODNN7EXAMPLE"}
 	result, _ := r.Redact(lines)
 
@@ -84,7 +84,7 @@ func TestRedact_AWSKey(t *testing.T) {
 }
 
 func TestRedact_Password(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"password=SuperSecret123!"}
 	result, _ := r.Redact(lines)
 
@@ -94,7 +94,7 @@ func TestRedact_Password(t *testing.T) {
 }
 
 func TestRedact_CreditCard_Visa(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"card: 4111111111111111"}
 	result, _ := r.Redact(lines)
 
@@ -104,7 +104,7 @@ func TestRedact_CreditCard_Visa(t *testing.T) {
 }
 
 func TestRedact_CreditCard_Mastercard(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"card: 5500000000000004"}
 	result, _ := r.Redact(lines)
 
@@ -114,7 +114,7 @@ func TestRedact_CreditCard_Mastercard(t *testing.T) {
 }
 
 func TestRedact_IBAN(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"account: DE89370400440532013000"}
 	result, _ := r.Redact(lines)
 
@@ -124,7 +124,7 @@ func TestRedact_IBAN(t *testing.T) {
 }
 
 func TestRedact_UUID(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"request_id=550e8400-e29b-41d4-a716-446655440000"}
 	result, _ := r.Redact(lines)
 
@@ -134,7 +134,7 @@ func TestRedact_UUID(t *testing.T) {
 }
 
 func TestRedact_PrivateKey(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"-----BEGIN RSA PRIVATE KEY-----"}
 	result, _ := r.Redact(lines)
 
@@ -144,7 +144,7 @@ func TestRedact_PrivateKey(t *testing.T) {
 }
 
 func TestRedact_APIKey(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"api_key=sk-1234567890abcdef"}
 	result, _ := r.Redact(lines)
 
@@ -154,7 +154,7 @@ func TestRedact_APIKey(t *testing.T) {
 }
 
 func TestRedact_NoSensitiveData(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"application started successfully", "listening on port 8080"}
 	result, stats := r.Redact(lines)
 
@@ -167,7 +167,7 @@ func TestRedact_NoSensitiveData(t *testing.T) {
 }
 
 func TestRedact_MultiplePatterns(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{"user admin@test.com connected from 10.0.0.1 with password=secret"}
 	result, stats := r.Redact(lines)
 
@@ -186,7 +186,7 @@ func TestRedact_MultiplePatterns(t *testing.T) {
 }
 
 func TestRedact_CustomPatterns(t *testing.T) {
-	r := New(`CUSTOM-\d+,TICKET-\d+`, false, 0, 0, zap.NewNop())
+	r := New(`CUSTOM-\d+,TICKET-\d+`, false, 0, 0, 0, zap.NewNop())
 	lines := []string{"processing CUSTOM-12345 and TICKET-67890"}
 	result, _ := r.Redact(lines)
 
@@ -200,7 +200,7 @@ func TestRedact_CustomPatterns(t *testing.T) {
 
 func TestRedact_InvalidCustomPattern(t *testing.T) {
 	// Invalid regex should be skipped without crash
-	r := New(`[invalid`, false, 0, 0, zap.NewNop())
+	r := New(`[invalid`, false, 0, 0, 0, zap.NewNop())
 	lines := []string{"normal log line"}
 	result, _ := r.Redact(lines)
 
@@ -210,7 +210,7 @@ func TestRedact_InvalidCustomPattern(t *testing.T) {
 }
 
 func TestRedact_Stats(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	lines := []string{
 		"normal line",
 		"email: test@test.com",
@@ -236,7 +236,7 @@ func TestRedact_Stats(t *testing.T) {
 // TestRedact_OversizeLineFailsClosed verifies a line over the per-line byte cap
 // is dropped (content never forwarded), not passed through.
 func TestRedact_OversizeLineFailsClosed(t *testing.T) {
-	r := New("", false, 32 /* tiny line cap */, 1<<20, zap.NewNop())
+	r := New("", false, 32 /* tiny line cap */, 1<<20, 0, zap.NewNop())
 	secret := "password=" + strings.Repeat("A", 100) // 100-char value, well over 32B line
 	result, stats := r.Redact([]string{secret})
 
@@ -257,7 +257,7 @@ func TestRedact_OversizeLineFailsClosed(t *testing.T) {
 // TestRedact_TotalByteBudgetFailsClosed verifies that once the cumulative byte
 // budget is exhausted, remaining lines are dropped rather than forwarded.
 func TestRedact_TotalByteBudgetFailsClosed(t *testing.T) {
-	r := New("", false, 1024, 20 /* tiny total budget */, zap.NewNop())
+	r := New("", false, 1024, 20 /* tiny total budget */, 0, zap.NewNop())
 	lines := []string{"0123456789", "0123456789", "this-line-should-be-dropped"}
 	result, stats := r.Redact(lines)
 
@@ -273,7 +273,7 @@ func TestRedact_TotalByteBudgetFailsClosed(t *testing.T) {
 // TestRedact_DefaultsApplied confirms non-positive caps fall back to safe
 // defaults rather than disabling the guard.
 func TestRedact_DefaultsApplied(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	if r.maxLineBytes != defaultMaxLineBytes || r.maxTotalBytes != defaultMaxTotalBytes {
 		t.Errorf("expected defaults, got line=%d total=%d", r.maxLineBytes, r.maxTotalBytes)
 	}

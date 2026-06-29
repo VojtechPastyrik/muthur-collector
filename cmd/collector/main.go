@@ -156,7 +156,7 @@ func runServer() error {
 		logger.Info("Loki integration disabled — alerts will be forwarded without log excerpts")
 	}
 	promClient := prometheus.NewClient(cfg.PrometheusURL, cfg.PrometheusLookbackMin, cfg.PrometheusEnabled, logger)
-	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, cfg.RedactMaxLineBytes, cfg.RedactMaxTotalBytes, logger)
+	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, cfg.RedactMaxLineBytes, cfg.RedactMaxTotalBytes, cfg.RedactMaxStringBytes, logger)
 
 	// mTLS keypair is hot-reloaded from the mounted Secret. The renew CronJob
 	// writes a fresh cert before expiry; the reloader picks it up on the next

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.2] — 2026-06-29
+
+### Added
+
+- `REDACT_MAX_STRING_BYTES` env (default `16384`, exposed via
+  `config.redactMaxStringBytes` in the chart). The non-log free-text cap
+  was previously hardcoded; operators can now tune it to match their
+  per-line cap. Non-positive values fall back to the safe default.
+
 ## [0.8.1] — 2026-06-29
 
 ### Added

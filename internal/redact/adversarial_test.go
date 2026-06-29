@@ -13,7 +13,7 @@ import (
 // non-matching so a future tightening of the patterns is visible as a diff
 // here, not as a silent privacy improvement nobody noticed.
 func TestRedact_Adversarial(t *testing.T) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 
 	cases := []struct {
 		name        string
@@ -131,7 +131,7 @@ func TestRedact_Adversarial(t *testing.T) {
 //
 // Run with: go test ./internal/redact -fuzz=FuzzRedact_NoEmailLeak -fuzztime=30s
 func FuzzRedact_NoEmailLeak(f *testing.F) {
-	r := New("", false, 0, 0, zap.NewNop())
+	r := New("", false, 0, 0, 0, zap.NewNop())
 	seeds := []string{
 		"%s",
 		"prefix %s suffix",
