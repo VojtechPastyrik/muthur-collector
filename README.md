@@ -97,6 +97,7 @@ The `alert.proto` schema is shared with [muthur](https://github.com/VojtechPasty
 | `PROMETHEUS_LOOKBACK_MINUTES` | `30` | Metric time window |
 | `REDACT_MAX_LINE_BYTES` | `8192` | Per-line byte cap; oversize lines dropped (fail closed) |
 | `REDACT_MAX_TOTAL_BYTES` | `262144` | Cumulative payload byte budget; excess lines dropped |
+| `REDACT_MAX_STRING_BYTES` | `16384` | Per-string cap for non-log fields (annotations, label values, metric descriptions); oversize strings replaced with a fail-closed marker |
 | `REDACT_EXTRA_PATTERNS` | _(empty)_ | Extra `name=regex` redaction patterns |
 | `WEBHOOK_MAX_CONCURRENT` | `50` | Max alerts processed at once; excess dropped, never blocked |
 
