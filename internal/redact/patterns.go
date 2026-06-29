@@ -42,5 +42,12 @@ var builtinPatterns = []pattern{
 
 	// Network
 	{category: "network", name: "ipv4", regex: regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`), replacement: "[ip]"},
-	{category: "network", name: "ipv6", regex: regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?i)\b(?:[0-9a-f]{1,4}:){1,7}:|(?i)\b(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}\b`), replacement: "[ip]"},
+	// IPv6 covers four canonical shapes:
+	//   1. Full 8-group:                 fe80:0:0:0:0:0:0:1
+	//   2. Trailing compression:         fe80::
+	//   3. Middle compression:           fe80::1, 2001:db8::1
+	//   4. Leading compression:          ::1, ::ffff:1 (loopback/IPv4-mapped)
+	// Shape (4) was missing before — loopback and IPv4-mapped addresses
+	// commonly leak through k8s networking logs in this form.
+	{category: "network", name: "ipv6", regex: regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?i)\b(?:[0-9a-f]{1,4}:){1,7}:|(?i)\b(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}\b|(?i)::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*\b`), replacement: "[ip]"},
 }

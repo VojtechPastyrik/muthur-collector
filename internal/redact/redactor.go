@@ -14,7 +14,19 @@ import (
 const (
 	defaultMaxLineBytes  = 8 * 1024   // 8 KiB per line
 	defaultMaxTotalBytes = 256 * 1024 // 256 KiB per payload
+
+	// maxStringBytes caps single non-log strings (Summary, Description, label
+	// values, metric descriptions). AlertManager and Prometheus payloads bound
+	// these to a few KB in normal use; the guard exists for an attacker who
+	// controls an annotation and ships a multi-MB blob to outweigh the regex
+	// engine. Fail-closed marker is returned instead of forwarding raw.
+	maxStringBytes = 16 * 1024 // 16 KiB per string field
 )
+
+// droppedStringMarker replaces a free-text string that exceeds maxStringBytes.
+// Distinct from the log-line marker so an operator reading the prompt can tell
+// which path failed closed.
+const droppedStringMarker = "[redacted: string dropped by size guard]"
 
 // droppedLineMarker replaces a line that is dropped by a size guard. It is a
 // constant containing no log-derived bytes, so it is always safe to forward.
@@ -121,6 +133,36 @@ func (r *Redactor) Redact(lines []string) ([]string, *Stats) {
 	return result, stats
 }
 
+// RedactString applies the same pattern set to a single free-text string from
+// fields that bypass the log path — alert annotations (Summary, Description),
+// label values, metric descriptions. The same regexes apply, so an embedded
+// email/token/IP is replaced consistently with the log redactor. Fails closed
+// past maxStringBytes (annotation-controlled inflation attack) and increments
+// metrics.RedactReplacements{surface="string"} for visibility — without this,
+// label-value redactions would be silent in metrics and a regression couldn't
+// be detected.
+func (r *Redactor) RedactString(s string) string {
+	if s == "" {
+		return s
+	}
+	if len(s) > maxStringBytes {
+		metrics.LinesDropped.WithLabelValues("oversize-string").Inc()
+		return droppedStringMarker
+	}
+	replacements := 0
+	for _, p := range r.patterns {
+		matches := p.regex.FindAllStringIndex(s, -1)
+		if len(matches) > 0 {
+			s = p.regex.ReplaceAllString(s, p.replacement)
+			replacements += len(matches)
+		}
+	}
+	if replacements > 0 {
+		metrics.RedactReplacements.WithLabelValues("string").Add(float64(replacements))
+	}
+	return s
+}
+
 func (r *Redactor) redactLine(line string, stats *Stats) (string, int) {
 	replacements := 0
 	for _, p := range r.patterns {
@@ -131,6 +173,9 @@ func (r *Redactor) redactLine(line string, stats *Stats) (string, int) {
 			stats.Replacements += len(matches)
 			stats.ByCategory[p.category] += len(matches)
 		}
+	}
+	if replacements > 0 {
+		metrics.RedactReplacements.WithLabelValues("log_line").Add(float64(replacements))
 	}
 	return line, replacements
 }

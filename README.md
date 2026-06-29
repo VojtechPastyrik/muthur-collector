@@ -57,14 +57,15 @@ helm install muthur-collector vojtechpastyrik/muthur-collector \
 
 ## PII redaction (a security boundary)
 
-All log lines are redacted before forwarding. Categories: email, phone, SSN, addresses, IPv4/IPv6, Bearer tokens, JWT, AWS keys, API keys, passwords, credit cards, IBAN, UUID. Custom patterns supported via `REDACT_EXTRA_PATTERNS`.
+The redactor runs on every field that leaves the cluster, not just log lines: alert annotations (Summary, Description), label names and values, and metric descriptions all go through the same pattern set as Loki log lines. Categories: email, phone, SSN, addresses, IPv4/IPv6 (including compressed `::1` / `::ffff:` forms), Bearer tokens, JWT, AWS keys, API keys, passwords, credit cards, IBAN, UUID. Custom patterns supported via `REDACT_EXTRA_PATTERNS`.
 
-Redaction is regex-based, so it catches *patterns* — not novel secrets or PII in odd formats. Because it is the one chance to sanitize untrusted log text before it reaches the downstream LLM, the size guards **fail closed**:
+Redaction is regex-based, so it catches *patterns* — not novel secrets or PII in odd formats. Because it is the one chance to sanitize untrusted text before it reaches the downstream LLM, the size guards **fail closed**:
 
 - A single log line over `REDACT_MAX_LINE_BYTES` (default 8 KiB) is **dropped** — its content is never forwarded raw — because a secret could hide past the region the line-oriented patterns reason about.
 - Once the cumulative redacted payload reaches `REDACT_MAX_TOTAL_BYTES` (default 256 KiB), the remaining lines are dropped.
+- A single free-text string (annotation, label value, metric description) over 16 KiB is replaced with a `[redacted: string dropped by size guard]` marker so an attacker-controlled annotation cannot push a multi-MB blob past the line-oriented caps.
 
-Both guards emit `muthur_collector_log_lines_dropped_total{reason=oversize|budget}`. The caps can be tuned but not disabled (non-positive values fall back to the defaults).
+Replacement counts are exposed as `muthur_collector_redact_replacements_total{surface=log_line|string}` so a drop in either path (e.g. label-value redactions falling to zero after a regex regression) is visible as a metric, not silent. Drops are tracked separately as `muthur_collector_log_lines_dropped_total{reason=oversize|budget|oversize-string}`. The caps can be tuned but not disabled (non-positive values fall back to the defaults).
 
 ## Query bounds & cost
 

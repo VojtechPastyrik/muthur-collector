@@ -84,16 +84,23 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 		Namespace:      namespace,
 		PodName:        target.PodName,
 		FiredAt:        alert.StartsAt.Unix(),
-		Summary:        alert.Annotations["summary"],
-		Description:    alert.Annotations["description"],
+		Summary:        p.redactor.RedactString(alert.Annotations["summary"]),
+		Description:    p.redactor.RedactString(alert.Annotations["description"]),
 		Target:         target,
 		Status:         status,
 		GrafanaBaseUrl: p.grafanaBaseURL,
 	}
 
-	// Convert labels
+	// Convert labels. Both name and value go through the redactor — values are
+	// the obvious PII vector (user IDs, emails, IPs in label values), but
+	// custom k8s labels can also leak through the *name* (e.g. a label
+	// `customer_email_alice_at_example_com=true` exposes structure even with
+	// a redacted value).
 	for k, v := range alert.Labels {
-		payload.Labels = append(payload.Labels, &pb.Label{Name: k, Value: v})
+		payload.Labels = append(payload.Labels, &pb.Label{
+			Name:  p.redactor.RedactString(k),
+			Value: p.redactor.RedactString(v),
+		})
 	}
 
 	// Resolved alerts need no enrichment — central only sends a "resolved"
@@ -135,6 +142,9 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 		metrics.EnrichErrors.WithLabelValues("prometheus").Inc()
 		p.logger.Warn("failed to fetch metrics", zap.Error(err))
 	} else {
+		for _, m := range promMetrics {
+			m.Description = p.redactor.RedactString(m.Description)
+		}
 		payload.Metrics = promMetrics
 	}
 

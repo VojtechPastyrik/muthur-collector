@@ -63,4 +63,14 @@ var (
 		Name: "muthur_collector_alerts_dropped_total",
 		Help: "Alerts dropped at the webhook due to the concurrency ceiling.",
 	})
+
+	// RedactReplacements counts individual pattern replacements made by the
+	// redactor across both log lines and free-text fields (Summary, Description,
+	// label values, metric descriptions). Labelled by surface so an unexpected
+	// drop in one path (e.g. labels going to 0) surfaces as a metric regression
+	// rather than a silent privacy leak.
+	RedactReplacements = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "muthur_collector_redact_replacements_total",
+		Help: "Pattern replacements made by the redactor, by surface (log_line | string).",
+	}, []string{"surface"})
 )

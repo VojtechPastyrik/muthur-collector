@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.8.1] — 2026-06-29
+
+### Added
+
+- **Redaction applied beyond log lines.** Alert annotations (Summary,
+  Description), label names, label values, and metric descriptions now run
+  through the same pattern set as Loki log lines before forwarding. Before
+  this, only `RedactedLogs` were sanitized — Prometheus labels routinely
+  carry user IDs and emails in annotations, which reached the downstream
+  LLM raw. Label *names* are now redacted too, since a custom label like
+  `customer_email_alice_at_example_com=true` leaks structure even when the
+  value is benign.
+- **Size guard for free-text fields.** Annotation, label, and metric
+  description strings over 16 KiB are replaced with a fail-closed marker
+  `[redacted: string dropped by size guard]`. Mirrors the per-line guard
+  on the log path; closes an attacker-controlled-annotation inflation
+  vector.
+- **IPv6 short forms** (`::1`, `::ffff:127.0.0.1`, `::2001:db8`) are now
+  caught by the redactor. The previous pattern required two or more groups
+  before the `::`, so leading-compressed forms slipped through.
+- **Redaction metrics.** New counter
+  `muthur_collector_redact_replacements_total{surface=log_line|string}`
+  surfaces both paths so a drop in either (e.g. label-value redactions
+  silently falling to zero after a pattern regression) is visible as a
+  metric. The fail-closed string drop is tracked alongside line drops as
+  `muthur_collector_log_lines_dropped_total{reason=oversize-string}`.
+- **Adversarial + fuzz tests** for the redactor. Table-driven cases pin
+  known-edge behaviour (compressed IPv6, multi-email lines, plus-tagged
+  addresses, etc.); a Go `FuzzRedact_NoEmailLeak` target asserts that no
+  surrounding junk lets an embedded email survive the redactor.
+
 ## [0.8.0] — 2026-06-28
 
 ### Changed
