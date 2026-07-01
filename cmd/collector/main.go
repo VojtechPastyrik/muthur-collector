@@ -114,6 +114,7 @@ func runRenew() error {
 		VendorCAFile: cfg.VendorCAFile,
 		Persister:    persister,
 		Logger:       logger,
+		RenewBefore:  cfg.RenewBefore,
 	}.Run(ctx)
 }
 

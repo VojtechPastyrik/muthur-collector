@@ -3,10 +3,13 @@ package auth
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -129,6 +132,15 @@ type RenewFlow struct {
 	VendorCAFile string // pre-installed bundle; falls back to ca from Persister
 	Persister    Persister
 	Logger       *zap.Logger
+
+	// RenewBefore is the runway threshold: if the current cert's remaining
+	// validity is greater than this, Run exits early without contacting the
+	// brain. Zero disables the check (rotate on every invocation — legacy
+	// behaviour). Typical value: 48h with a 168h cert.
+	RenewBefore time.Duration
+
+	// Now is injected for tests. Nil = time.Now.
+	Now func() time.Time
 }
 
 func (r RenewFlow) Run(ctx context.Context) error {
@@ -151,6 +163,31 @@ func (r RenewFlow) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read current cert: %w", err)
 	}
+
+	if r.RenewBefore > 0 {
+		now := time.Now
+		if r.Now != nil {
+			now = r.Now
+		}
+		remaining, parseErr := certRemaining(certPEM, now())
+		switch {
+		case parseErr != nil:
+			// Malformed cert — fall through to renewal. Fresh cert will
+			// overwrite the bad one; failing closed here would strand a
+			// collector whose Secret got corrupted.
+			r.Logger.Warn("renew: could not parse current cert; proceeding with renewal",
+				zap.Error(parseErr),
+			)
+		case remaining > r.RenewBefore:
+			r.Logger.Info("renew: cert still fresh, skipping",
+				zap.Duration("remaining", remaining),
+				zap.Duration("renew_before", r.RenewBefore),
+				zap.String("cluster_id", r.ClusterID),
+			)
+			return nil
+		}
+	}
+
 	clientCert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return fmt.Errorf("parse current keypair: %w", err)
@@ -196,4 +233,18 @@ func (r RenewFlow) Run(ctx context.Context) error {
 		zap.String("cluster_id", r.ClusterID),
 	)
 	return nil
+}
+
+// certRemaining returns how much validity the leaf in certPEM has left at
+// the given moment. The first PEM block is treated as the leaf.
+func certRemaining(certPEM []byte, now time.Time) (time.Duration, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return 0, errors.New("no PEM block in cert")
+	}
+	crt, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return 0, fmt.Errorf("parse cert: %w", err)
+	}
+	return crt.NotAfter.Sub(now), nil
 }

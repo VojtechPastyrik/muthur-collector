@@ -1,16 +1,18 @@
 {{- /*
   Cert rotation CronJob.
 
-  Runs the collector image with `renew` as the entry argument: read the
-  existing cert from the Secret via the K8s API, generate a fresh keypair,
-  POST to /sign-csr over mTLS using the OLD cert, and update the Secret.
-  kubelet propagates the new Secret data to the main pod's mounted volume
-  within seconds; the file-mtime ClientReloader picks it up on the next
-  outbound TLS handshake.
+  Runs the collector image with `renew` as the entry argument. The renew
+  binary first inspects the current cert; if more than `renewBefore` of
+  validity remains, it exits without contacting the brain. Otherwise it
+  reads the existing cert from the Secret via the K8s API, generates a
+  fresh keypair, POSTs to /sign-csr over mTLS using the OLD cert, and
+  updates the Secret. kubelet propagates the new Secret data to the main
+  pod's mounted volume within seconds; the file-mtime ClientReloader picks
+  it up on the next outbound TLS handshake.
 
-  Schedule defaults to once a day; with a 30-day cert and a 7-day
-  renewBefore window, a single missed schedule still leaves 6 days of
-  runway. Tighten if your cert lifetime is shorter.
+  Because the actual rotation only fires inside the renewBefore window,
+  the cron can safely run daily (or more often) — every extra tick is a
+  free retry against a flaky brain without churning the cert.
 */}}
 {{- if .Values.auth.renewCron.enabled }}
 apiVersion: batch/v1
@@ -57,6 +59,10 @@ spec:
                       fieldPath: metadata.namespace
                 - name: CERT_SECRET_NAME
                   value: {{ include "muthur-collector.fullname" . }}-tls
+                {{- with .Values.auth.renewCron.renewBefore }}
+                - name: RENEW_BEFORE
+                  value: {{ . | quote }}
+                {{- end }}
               envFrom:
                 - configMapRef:
                     name: {{ include "muthur-collector.fullname" . }}-config

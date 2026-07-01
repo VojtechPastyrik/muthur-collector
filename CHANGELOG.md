@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.9.0] — 2026-07-01
+
+### Added
+
+- **`renewBefore` runway check for the renew CronJob.** The renew binary
+  now inspects the current cert's remaining validity before contacting
+  the brain. If the cert still has more than `RENEW_BEFORE` (default
+  `48h`) of life left, the run logs `renew: cert still fresh, skipping`
+  and exits 0 without a brain call. Lets the cron fire daily (or more
+  often) as a free retry against a flaky brain without churning the cert
+  on every tick.
+- **`auth.renewCron.renewBefore` chart value** (default `"48h"`, empty
+  string omits the env). Wired into the CronJob as `RENEW_BEFORE`.
+  Regex-validated as a Go duration in `values.schema.json`. Set to `"0"`
+  to disable the check and restore the pre-0.9.0 always-rotate behaviour.
+- **`flows_test.go`** with cases for the skip path, the near-expiry
+  proceed path, the disabled-check legacy path, and malformed-cert
+  fail-open.
+
+### Changed
+
+- Chart comments on the renew CronJob no longer claim a "30-day cert +
+  7-day renewBefore" default that the code never implemented. The
+  updated comments describe the actual behaviour and give concrete
+  `certDuration` + `renewBefore` pairings.
+- Malformed cert PEM in the Secret is now treated as fail-open: the
+  renew flow logs a warning and proceeds to rotate rather than stranding
+  a collector whose Secret got corrupted.
+
+### Fixed
+
+- **Zero-runway configuration hazard.** Before this release, pairing the
+  brain's `certDuration: 24h` with the default daily `schedule: "30 3 *
+  * *"` gave a single failed renew run enough time to let the cert
+  expire, after which mTLS to the brain became impossible and only a
+  re-bootstrap could recover. With `renewBefore` in place, the same
+  cron schedule tolerates multiple consecutive failures inside the
+  runway window.
+
 ## [0.8.2] — 2026-06-29
 
 ### Added

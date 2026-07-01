@@ -65,12 +65,20 @@ auth:
   # muthur-root-ca-tls.tls.crt the brain chart provisions, OR the public
   # cert exported from the central cluster after `helm install`.
   vendorCABundle: ""
-  # CronJob that renews the cert before expiry. Defaults assume a 30-day
-  # cert + 7-day renewBefore: one daily run gives 6 days of recovery
-  # runway after a single missed schedule.
+  # CronJob that renews the cert before expiry. The cron fires often; the
+  # collector renew binary skips the actual brain call while the current
+  # cert still has more than `renewBefore` of validity left. This lets a
+  # transient brain outage self-heal without rotating the cert on every
+  # tick.
+  #
+  # Tune together with the brain tenant's certDuration:
+  #   certDuration=168h + renewBefore=48h → renewal fires only in the last
+  #   2 days, and 2 daily attempts of runway survive a brain outage.
+  #   certDuration=24h  + renewBefore=0   → rotate every run (legacy).
   renewCron:
     enabled: true
     schedule: "30 3 * * *"
+    renewBefore: "48h"
     resources:
       limits:
         cpu: 200m

@@ -46,6 +46,11 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "schedule": { "type": "string" },
+            "renewBefore": {
+              "type": "string",
+              "description": "Skip renewal if the current cert has more than this much validity left. Go duration (e.g. \"48h\", \"12h\"). Empty or \"0\" disables the check.",
+              "pattern": "^(0|[0-9]+(ns|us|µs|ms|s|m|h))+$"
+            },
             "resources": { "type": "object" }
           }
         }

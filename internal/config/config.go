@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -42,6 +43,13 @@ type Config struct {
 	VendorCAFile       string
 	CertSecretName     string
 	Namespace          string
+
+	// RenewBefore is the runway threshold for the renew CronJob. If the
+	// current cert has more remaining validity than this, the renew run
+	// exits early without contacting the brain. Lets the CronJob fire
+	// often (self-healing on transient brain outages) without rotating
+	// the cert on every tick.
+	RenewBefore time.Duration
 }
 
 func Load() (*Config, error) {
@@ -55,6 +63,12 @@ func Load() (*Config, error) {
 	redactMaxTotalBytes, _ := strconv.Atoi(envOr("REDACT_MAX_TOTAL_BYTES", "262144"))
 	redactMaxStringBytes, _ := strconv.Atoi(envOr("REDACT_MAX_STRING_BYTES", "16384"))
 	webhookMaxConcurrent, _ := strconv.Atoi(envOr("WEBHOOK_MAX_CONCURRENT", "50"))
+
+	renewBeforeRaw := envOr("RENEW_BEFORE", "48h")
+	renewBefore, err := time.ParseDuration(renewBeforeRaw)
+	if err != nil {
+		return nil, fmt.Errorf("parse RENEW_BEFORE %q: %w", renewBeforeRaw, err)
+	}
 
 	cfg := &Config{
 		ClusterID:             os.Getenv("CLUSTER_ID"),
@@ -82,6 +96,8 @@ func Load() (*Config, error) {
 		VendorCAFile:       envOr("VENDOR_CA_FILE", "/secrets/vendor-ca/ca.crt"),
 		CertSecretName:     os.Getenv("CERT_SECRET_NAME"),
 		Namespace:          os.Getenv("POD_NAMESPACE"),
+
+		RenewBefore: renewBefore,
 	}
 
 	if cfg.ClusterID == "" {
