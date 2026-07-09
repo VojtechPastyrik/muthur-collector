@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.10.0] — 2026-07-09
+
+### Added
+
+- **Kubernetes events enrichment.** The pipeline now fetches events for
+  every target object (resolved pods, plus the PVC when the alert
+  targets one) via a server-side field selector on
+  `involvedObject.name`. A pod stuck in `Pending` produces no logs and
+  no container metrics — the actual reason (`FailedScheduling`,
+  `FailedMount`, unbound PVC, `ImagePullBackOff`) exists only as
+  events, so the brain's LLM analysis was blind to the most common
+  scheduling failures. Event messages pass through the same redactor
+  as log lines. Bounded: 25 events per object, 50 per payload, newest
+  first. Fail-soft like the other enrichment steps
+  (`muthur_collector_enrich_errors_total{source="events"}`).
+- **RBAC:** the ClusterRole gains read-only (`get`, `list`) access to
+  `events` in the core API group.
+
+### Changed
+
+- **Protobuf contract:** `AlertPayload` gains `repeated KubernetesEvent
+  events = 19`. The contract hash changed — this release pairs with
+  muthur (central) `0.9.0`; deploy the brain first so it understands
+  the new field (older brains simply ignore it, so the order is a
+  recommendation, not a hard requirement).
+
 ## [0.9.0] — 2026-07-01
 
 ### Added

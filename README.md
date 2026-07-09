@@ -6,7 +6,7 @@
 
 Lightweight Kubernetes alert collector agent. Part of the [muthur](https://github.com/VojtechPastyrik) monitoring system.
 
-Receives AlertManager webhooks, resolves alert targets via the K8s API, fetches logs from Loki and metrics from Prometheus, redacts PII and credentials, and forwards enriched protobuf payloads to [muthur](https://github.com/VojtechPastyrik/muthur).
+Receives AlertManager webhooks, resolves alert targets via the K8s API, fetches logs from Loki, metrics from Prometheus and Kubernetes events for the target objects, redacts PII and credentials, and forwards enriched protobuf payloads to [muthur](https://github.com/VojtechPastyrik/muthur).
 
 <sub>**Keywords:** Kubernetes alert enrichment · AlertManager webhook collector · Loki log + Prometheus metric enrichment · PII / credential redaction · AIOps · SRE · observability · self-hosted.</sub>
 
@@ -74,6 +74,7 @@ Enrichment fetches are hard-bounded so an alert storm can't turn into a Loki/Pro
 - **Loki** — `LOKI_LOOKBACK_MINUTES` time window, `LOKI_MAX_LOG_LINES` line cap (sent as the Loki `limit` *and* enforced client-side across pods).
 - **Prometheus** — a fixed set of queries per target type, `PROMETHEUS_LOOKBACK_MINUTES` window, 60s step, first series only.
 - **Targets** — at most 10 pods resolved per alert.
+- **Kubernetes events** — fetched per target object (resolved pods + PVC) with a server-side field selector, capped at 25 events per object and 50 per payload; event messages go through the same redactor as log lines. A pod stuck in `Pending` has no logs — the reason (`FailedScheduling`, `FailedMount`, unbound PVC, `ImagePullBackOff`) exists only as events.
 
 ## Resilience
 
@@ -82,7 +83,7 @@ Enrichment fetches are hard-bounded so an alert storm can't turn into a Loki/Pro
 
 ## Kubernetes RBAC
 
-The ServiceAccount is **read-only** (`get`, `list`) on exactly the resources needed to resolve targets: pods, namespaces, nodes, PVCs, and apps workloads (deployments, daemonsets, statefulsets, replicasets). No `secrets`, no write verbs, no `watch`. It is a ClusterRole (cluster-wide read) because alerts can target any namespace.
+The ServiceAccount is **read-only** (`get`, `list`) on exactly the resources needed to resolve targets and enrich alerts: pods, namespaces, nodes, PVCs, events, and apps workloads (deployments, daemonsets, statefulsets, replicasets). No `secrets`, no write verbs, no `watch`. It is a ClusterRole (cluster-wide read) because alerts can target any namespace.
 
 ## Protobuf contract sync
 
