@@ -17,6 +17,10 @@ import (
 	pb "github.com/VojtechPastyrik/muthur-collector/proto"
 )
 
+// maxEventsPerPayload caps total events across all target objects; the
+// per-object cap lives in the k8s client.
+const maxEventsPerPayload = 50
+
 type Pipeline struct {
 	clusterID      string
 	grafanaBaseURL string
@@ -158,6 +162,34 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 				continue
 			}
 			payload.PodMetas = append(payload.PodMetas, meta)
+		}
+	}
+
+	// Fetch Kubernetes events for the target objects. A pod stuck in Pending
+	// produces no logs and no container metrics — the reason (FailedScheduling,
+	// FailedMount, PVC not bound, ImagePullBackOff) exists only as events.
+	if p.k8sClient != nil && namespace != "" {
+		objects := append([]string{}, target.ResolvedPods...)
+		if target.Pvc != "" {
+			objects = append(objects, target.Pvc)
+		}
+		evStart := time.Now()
+		for _, name := range objects {
+			events, err := p.k8sClient.FetchEvents(ctx, namespace, name)
+			if err != nil {
+				metrics.EnrichErrors.WithLabelValues("events").Inc()
+				p.logger.Warn("failed to fetch events",
+					zap.String("object", name), zap.Error(err))
+				continue
+			}
+			for _, ev := range events {
+				ev.Message = p.redactor.RedactString(ev.Message)
+			}
+			payload.Events = append(payload.Events, events...)
+		}
+		metrics.EnrichDuration.WithLabelValues("events").Observe(time.Since(evStart).Seconds())
+		if len(payload.Events) > maxEventsPerPayload {
+			payload.Events = payload.Events[:maxEventsPerPayload]
 		}
 	}
 

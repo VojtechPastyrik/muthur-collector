@@ -44,6 +44,8 @@ message AlertPayload {
 
   string status = 17; // firing | resolved
   string grafana_base_url = 18; // collector-provided Grafana base URL
+
+  repeated KubernetesEvent events = 19; // recent events on the alert target
 }
 
 message AlertTarget {
@@ -83,6 +85,20 @@ message PodMeta {
 message Label {
   string name  = 1;
   string value = 2;
+}
+
+// KubernetesEvent carries scheduling/lifecycle context the LLM cannot see in
+// logs or metrics — FailedScheduling, FailedMount, ImagePullBackOff reasons
+// live only in events. Messages pass through the collector's redaction
+// boundary like log lines.
+message KubernetesEvent {
+  string type                 = 1; // Normal | Warning
+  string reason               = 2; // e.g. FailedScheduling, FailedMount
+  string message              = 3; // redacted event message
+  int64  first_timestamp      = 4; // unix timestamp seconds
+  int64  last_timestamp       = 5; // unix timestamp seconds
+  int32  count                = 6;
+  string involved_object_name = 7; // pod/pvc/etc the event is about
 }
 
 message IngestResponse {}

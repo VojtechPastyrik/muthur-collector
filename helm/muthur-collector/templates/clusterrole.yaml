@@ -6,7 +6,7 @@ metadata:
     {{- include "muthur-collector.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "namespaces", "nodes", "persistentvolumeclaims"]
+    resources: ["pods", "namespaces", "nodes", "persistentvolumeclaims", "events"]
     verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]

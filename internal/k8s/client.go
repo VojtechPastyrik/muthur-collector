@@ -9,7 +9,7 @@ import (
 )
 
 type Client struct {
-	clientset *kubernetes.Clientset
+	clientset kubernetes.Interface
 	logger    *zap.Logger
 }
 
@@ -28,6 +28,6 @@ func NewClient(logger *zap.Logger) (*Client, error) {
 }
 
 // NewClientFromClientset creates a Client from an existing clientset (for testing).
-func NewClientFromClientset(cs *kubernetes.Clientset, logger *zap.Logger) *Client {
+func NewClientFromClientset(cs kubernetes.Interface, logger *zap.Logger) *Client {
 	return &Client{clientset: cs, logger: logger}
 }
