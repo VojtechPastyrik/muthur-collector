@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.11.0] — 2026-09-10
+
+### Added
+
+- **Signed transport (`auth.mode: signed` / `AUTH_MODE=signed`).**
+  Reach the brain through Cloudflare, a cloud load balancer or a plain
+  `Ingress` — anything that terminates TLS. The collector signs every
+  request with its existing leaf key (RFC 9421 subset, ECDSA P-256)
+  and HPKE-seals the protobuf body to the brain's X25519 key
+  (RFC 9180, stdlib `crypto/hpke`); the edge sees ciphertext only.
+  Bootstrap, renew and forwarding all switch on the mode; the PKI,
+  the Secret layout and the renew CronJob are unchanged.
+  `CENTRAL_AGENT_URL` becomes `https://host` (no path prefix) in this
+  mode. Optional `SIGNED_TLS_CA_FILE` pins a private edge CA. Design
+  and wire format in `docs/signed-transport.md`.
+
+### Changed
+
+- Replay nonces come from `crypto/rand` on both transports; on the
+  signed transport the nonce is also AEAD associated data.
+- Requires muthur (central) `>=0.10.0` with `signed` in `AUTH_MODES`
+  for the new mode; mTLS deployments need no action. Protobuf contract
+  unchanged.
+
 ## [0.10.0] — 2026-07-09
 
 ### Added
