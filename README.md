@@ -101,6 +101,8 @@ The `alert.proto` schema is shared with [muthur](https://github.com/VojtechPasty
 | `REDACT_MAX_STRING_BYTES` | `16384` | Per-string cap for non-log fields (annotations, label values, metric descriptions); oversize strings replaced with a fail-closed marker |
 | `REDACT_EXTRA_PATTERNS` | _(empty)_ | Extra `name=regex` redaction patterns |
 | `WEBHOOK_MAX_CONCURRENT` | `50` | Max alerts processed at once; excess dropped, never blocked |
+| `AUTH_MODE` | `mtls` | `mtls` (gRPC, passthrough path) or `signed` (HTTPS through any TLS-terminating edge; see `docs/signed-transport.md`) |
+| `SIGNED_TLS_CA_FILE` | _(system roots)_ | Pin the CA of the edge TLS certificate in `signed` mode |
 
 ## License
 
