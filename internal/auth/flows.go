@@ -56,9 +56,14 @@ func (f FilePersister) Write(_ context.Context, cert, key, ca []byte) error {
 //     send a CSR + token to /bootstrap-cert, and persist the returned leaf
 //     and CA so the main container can mount them.
 type BootstrapFlow struct {
-	ClusterID          string
-	TenantID           string
-	BrainURL           string
+	ClusterID string
+	TenantID  string
+	BrainURL  string
+	// Transport selects the brain client: "signed" for the HTTP transport,
+	// anything else (including empty) for gRPC mTLS.
+	Transport string
+	// EdgeCAFile pins the edge TLS CA on the signed transport (optional).
+	EdgeCAFile         string
 	BootstrapTokenFile string
 	VendorCAFile       string // pre-installed CA bundle (chart-provided)
 	Persister          Persister
@@ -98,7 +103,7 @@ func (b BootstrapFlow) Run(ctx context.Context) error {
 		return fmt.Errorf("generate CSR: %w", err)
 	}
 
-	client, err := NewBrainClient(b.BrainURL, b.VendorCAFile)
+	client, err := newEnrolmentClient(b.Transport, b.BrainURL, b.VendorCAFile, b.EdgeCAFile)
 	if err != nil {
 		return fmt.Errorf("brain client: %w", err)
 	}
@@ -129,6 +134,8 @@ type RenewFlow struct {
 	ClusterID    string
 	TenantID     string
 	BrainURL     string
+	Transport    string
+	EdgeCAFile   string
 	VendorCAFile string // pre-installed bundle; falls back to ca from Persister
 	Persister    Persister
 	Logger       *zap.Logger
@@ -217,7 +224,7 @@ func (r RenewFlow) Run(ctx context.Context) error {
 		caFile = tmp.Name()
 	}
 
-	client, err := NewBrainClient(r.BrainURL, caFile)
+	client, err := newEnrolmentClient(r.Transport, r.BrainURL, caFile, r.EdgeCAFile)
 	if err != nil {
 		return fmt.Errorf("brain client: %w", err)
 	}
@@ -247,4 +254,18 @@ func certRemaining(certPEM []byte, now time.Time) (time.Duration, error) {
 		return 0, fmt.Errorf("parse cert: %w", err)
 	}
 	return crt.NotAfter.Sub(now), nil
+}
+
+// enrolmentClient is what the bootstrap and renew flows need from a brain
+// client; BrainClient (gRPC mTLS) and SignedClient (HTTP) both satisfy it.
+type enrolmentClient interface {
+	Bootstrap(ctx context.Context, clusterID, token string, csrPEM []byte) (cert, ca []byte, err error)
+	Renew(ctx context.Context, clientCert tls.Certificate, csrPEM []byte) (cert, ca []byte, err error)
+}
+
+func newEnrolmentClient(transport, brainURL, caFile, edgeCAFile string) (enrolmentClient, error) {
+	if transport == "signed" {
+		return NewSignedClient(brainURL, caFile, edgeCAFile)
+	}
+	return NewBrainClient(brainURL, caFile)
 }

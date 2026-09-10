@@ -242,3 +242,24 @@ func writeClientKeypair(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.Pri
 		t.Fatal(err)
 	}
 }
+
+func TestIsPermanent_HTTPError(t *testing.T) {
+	if !isPermanent(&auth.HTTPError{Status: 401, Code: "bad_signature"}) {
+		t.Fatal("401 must be permanent")
+	}
+	if isPermanent(&auth.HTTPError{Status: 503, Code: "internal"}) {
+		t.Fatal("503 must be retried")
+	}
+	if isPermanent(errors.New("dial tcp: connection refused")) {
+		t.Fatal("transport errors must be retried")
+	}
+}
+
+func TestNewSigned_Validation(t *testing.T) {
+	if _, err := NewSigned(SignedConfig{}, zap.NewNop()); err == nil {
+		t.Fatal("expected error without BaseURL")
+	}
+	if _, err := NewSigned(SignedConfig{BaseURL: "https://brain.example"}, zap.NewNop()); err == nil {
+		t.Fatal("expected error without reloader")
+	}
+}

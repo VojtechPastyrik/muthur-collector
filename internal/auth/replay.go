@@ -1,8 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
 	"encoding/hex"
-	"math/rand/v2"
 )
 
 // Replay-protection metadata keys. The collector attaches both on every gRPC
@@ -15,13 +15,13 @@ const (
 	MetaNonce     = "x-muthur-nonce"
 )
 
-// FreshNonce returns a 32-hex-char random nonce. math/rand/v2 seeds itself
-// from crypto/rand and is plenty for replay protection, where uniqueness —
-// not unpredictability — is the load-bearing property.
+// FreshNonce returns a 32-hex-char random nonce. On the signed transport the
+// nonce is also AAD for the HPKE envelope and part of the signed base, so it
+// comes straight from crypto/rand rather than a seeded PRNG.
 func FreshNonce() string {
 	var b [16]byte
-	for i := range b {
-		b[i] = byte(rand.Uint32())
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("auth: crypto/rand unavailable: " + err.Error())
 	}
 	return hex.EncodeToString(b[:])
 }

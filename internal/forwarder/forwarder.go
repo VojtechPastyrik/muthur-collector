@@ -30,6 +30,11 @@ type Forwarder struct {
 	conn   *grpc.ClientConn
 	client pb.BrainClient
 	logger *zap.Logger
+
+	// signed + reloader are set instead of conn/client on the signed
+	// transport; send picks the path by which one is present.
+	signed   *auth.SignedClient
+	reloader *auth.ClientReloader
 }
 
 // Config bundles the inputs Forwarder needs to wire its gRPC transport.
@@ -73,6 +78,35 @@ func New(cfg Config, logger *zap.Logger) (*Forwarder, error) {
 		client: pb.NewBrainClient(conn),
 		logger: logger,
 	}, nil
+}
+
+// SignedConfig bundles the inputs for the signed HTTP transport.
+type SignedConfig struct {
+	// BaseURL is the brain's signed endpoint as https://host (no path).
+	BaseURL string
+	// CARootFile is the vendor trust root, used to verify the brain's
+	// advertised HPKE keys.
+	CARootFile string
+	// EdgeCAFile optionally pins the CA behind the edge's TLS certificate.
+	EdgeCAFile string
+	Reloader   *auth.ClientReloader
+}
+
+// NewSigned constructs a Forwarder that ships payloads over the signed HTTP
+// transport. The client cert still comes from ClientReloader — it signs
+// requests instead of authenticating a TLS handshake.
+func NewSigned(cfg SignedConfig, logger *zap.Logger) (*Forwarder, error) {
+	if cfg.BaseURL == "" {
+		return nil, errors.New("forwarder: BaseURL is required")
+	}
+	if cfg.Reloader == nil {
+		return nil, errors.New("forwarder: ClientReloader is required")
+	}
+	client, err := auth.NewSignedClient(cfg.BaseURL, cfg.CARootFile, cfg.EdgeCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("forwarder: %w", err)
+	}
+	return &Forwarder{signed: client, reloader: cfg.Reloader, logger: logger}, nil
 }
 
 // Close releases the underlying gRPC connection. Safe to call once at shutdown.
@@ -144,6 +178,13 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 }
 
 func (f *Forwarder) send(ctx context.Context, payload *pb.AlertPayload) error {
+	if f.signed != nil {
+		cert, err := f.reloader.GetClientCertificate(nil)
+		if err != nil {
+			return fmt.Errorf("load client cert: %w", err)
+		}
+		return f.signed.Ingest(ctx, payload, cert)
+	}
 	ctx = metadata.AppendToOutgoingContext(ctx,
 		auth.MetaTimestamp, strconv.FormatInt(time.Now().Unix(), 10),
 		auth.MetaNonce, auth.FreshNonce(),
@@ -159,6 +200,10 @@ func (f *Forwarder) send(ctx context.Context, payload *pb.AlertPayload) error {
 // are all permanent — a retry without operator intervention will not change
 // the answer.
 func isPermanent(err error) bool {
+	var he *auth.HTTPError
+	if errors.As(err, &he) {
+		return he.Permanent()
+	}
 	switch status.Code(err) {
 	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied,
 		codes.FailedPrecondition, codes.NotFound, codes.Unimplemented:
@@ -166,4 +211,3 @@ func isPermanent(err error) bool {
 	}
 	return false
 }
-

@@ -81,6 +81,8 @@ func runBootstrap() error {
 		ClusterID:          cfg.ClusterID,
 		TenantID:           cfg.TenantID,
 		BrainURL:           cfg.CentralAgentURL,
+		Transport:          cfg.AuthMode,
+		EdgeCAFile:         cfg.SignedEdgeCAFile,
 		BootstrapTokenFile: cfg.BootstrapTokenFile,
 		VendorCAFile:       cfg.VendorCAFile,
 		Persister:          persister,
@@ -111,6 +113,8 @@ func runRenew() error {
 		ClusterID:    cfg.ClusterID,
 		TenantID:     cfg.TenantID,
 		BrainURL:     cfg.CentralAgentURL,
+		Transport:    cfg.AuthMode,
+		EdgeCAFile:   cfg.SignedEdgeCAFile,
 		VendorCAFile: cfg.VendorCAFile,
 		Persister:    persister,
 		Logger:       logger,
@@ -167,11 +171,21 @@ func runServer() error {
 		return fmt.Errorf("load client cert (bootstrap not run?): %w", err)
 	}
 
-	fwd, err := forwarder.New(forwarder.Config{
-		Target:     cfg.CentralAgentURL,
-		CARootFile: cfg.CACertFile(),
-		Reloader:   reloader,
-	}, logger)
+	var fwd *forwarder.Forwarder
+	if cfg.AuthMode == config.AuthModeSigned {
+		fwd, err = forwarder.NewSigned(forwarder.SignedConfig{
+			BaseURL:    cfg.CentralAgentURL,
+			CARootFile: cfg.CACertFile(),
+			EdgeCAFile: cfg.SignedEdgeCAFile,
+			Reloader:   reloader,
+		}, logger)
+	} else {
+		fwd, err = forwarder.New(forwarder.Config{
+			Target:     cfg.CentralAgentURL,
+			CARootFile: cfg.CACertFile(),
+			Reloader:   reloader,
+		}, logger)
+	}
 	if err != nil {
 		return fmt.Errorf("init forwarder: %w", err)
 	}
@@ -195,9 +209,10 @@ func runServer() error {
 	})
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
-	logger.Info("starting muthur-collector (mTLS)",
+	logger.Info("starting muthur-collector",
 		zap.String("addr", addr),
 		zap.String("cluster_id", cfg.ClusterID),
+		zap.String("auth_mode", cfg.AuthMode),
 	)
 	return http.ListenAndServe(addr, r)
 }

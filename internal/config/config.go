@@ -8,9 +8,17 @@ import (
 )
 
 type Config struct {
-	ClusterID             string
-	TenantID              string
-	CentralAgentURL       string
+	ClusterID       string
+	TenantID        string
+	CentralAgentURL string
+
+	// AuthMode selects the transport to the brain: "mtls" (gRPC, the brain
+	// terminates TLS itself) or "signed" (HTTPS through any TLS-terminating
+	// edge; requests are signed with the collector cert and HPKE-sealed).
+	AuthMode string
+	// SignedEdgeCAFile optionally pins the CA of the edge's TLS certificate
+	// in signed mode. Empty means system roots.
+	SignedEdgeCAFile      string
 	LokiEnabled           bool
 	LokiURL               string
 	LokiLookbackMinutes   int
@@ -74,6 +82,8 @@ func Load() (*Config, error) {
 		ClusterID:             os.Getenv("CLUSTER_ID"),
 		TenantID:              os.Getenv("TENANT_ID"),
 		CentralAgentURL:       os.Getenv("CENTRAL_AGENT_URL"),
+		AuthMode:              envOr("AUTH_MODE", AuthModeMTLS),
+		SignedEdgeCAFile:      os.Getenv("SIGNED_TLS_CA_FILE"),
 		LokiEnabled:           lokiEnabled,
 		LokiURL:               envOr("LOKI_URL", "http://loki.monitoring.svc:3100"),
 		LokiLookbackMinutes:   lokiLookback,
@@ -106,6 +116,11 @@ func Load() (*Config, error) {
 	if cfg.CentralAgentURL == "" {
 		return nil, fmt.Errorf("CENTRAL_AGENT_URL is required")
 	}
+	switch cfg.AuthMode {
+	case AuthModeMTLS, AuthModeSigned:
+	default:
+		return nil, fmt.Errorf("unknown AUTH_MODE %q (want mtls or signed)", cfg.AuthMode)
+	}
 
 	return cfg, nil
 }
@@ -126,3 +141,9 @@ func (c *Config) CertFile() string { return c.CertDir + "/tls.crt" }
 
 // KeyFile returns the path to the collector's private key inside CertDir.
 func (c *Config) KeyFile() string { return c.CertDir + "/tls.key" }
+
+// Auth mode names accepted in AUTH_MODE.
+const (
+	AuthModeMTLS   = "mtls"
+	AuthModeSigned = "signed"
+)
