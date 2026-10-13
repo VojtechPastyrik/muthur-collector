@@ -177,6 +177,27 @@ func (f *Forwarder) Forward(ctx context.Context, payload *pb.AlertPayload) error
 	return fmt.Errorf("forward failed: %w", lastErr)
 }
 
+// Heartbeat sends one liveness beat. Unlike Forward it does not retry: the
+// next beat is already scheduled, so a retry would only queue stale liveness
+// claims behind a transport that is currently failing. A failed beat is a
+// signal in itself — if the brain is unreachable, it is also not receiving
+// alerts, and the brain's own watchdog will notice the silence.
+func (f *Forwarder) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) error {
+	if f.signed != nil {
+		cert, err := f.reloader.GetClientCertificate(nil)
+		if err != nil {
+			return fmt.Errorf("load client cert: %w", err)
+		}
+		return f.signed.Heartbeat(ctx, req, cert)
+	}
+	ctx = metadata.AppendToOutgoingContext(ctx,
+		auth.MetaTimestamp, strconv.FormatInt(time.Now().Unix(), 10),
+		auth.MetaNonce, auth.FreshNonce(),
+	)
+	_, err := f.client.Heartbeat(ctx, req)
+	return err
+}
+
 func (f *Forwarder) send(ctx context.Context, payload *pb.AlertPayload) error {
 	if f.signed != nil {
 		cert, err := f.reloader.GetClientCertificate(nil)
