@@ -2,15 +2,14 @@ package pipeline
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/VojtechPastyrik/muthur-collector/internal/forwarder"
 	"github.com/VojtechPastyrik/muthur-collector/internal/k8s"
-	"github.com/VojtechPastyrik/muthur-collector/internal/loki"
 	"github.com/VojtechPastyrik/muthur-collector/internal/metrics"
-	"github.com/VojtechPastyrik/muthur-collector/internal/prometheus"
 	"github.com/VojtechPastyrik/muthur-collector/internal/redact"
 	"github.com/VojtechPastyrik/muthur-collector/internal/resolver"
 	"github.com/VojtechPastyrik/muthur-collector/internal/webhook"
@@ -21,41 +20,71 @@ import (
 // per-object cap lives in the k8s client.
 const maxEventsPerPayload = 50
 
-type Pipeline struct {
-	clusterID      string
-	grafanaBaseURL string
-	resolver       *resolver.Resolver
-	loki           *loki.Client
-	prom           *prometheus.Client
-	k8sClient      *k8s.Client
-	redactor       *redact.Redactor
-	forwarder      *forwarder.Forwarder
-	logger         *zap.Logger
+// LogFetcher returns recent log lines for the alert target. Implemented by
+// internal/loki and internal/victorialogs; the pipeline does not care which,
+// beyond labelling its enrichment metrics with Name().
+type LogFetcher interface {
+	FetchLogs(ctx context.Context, namespace string, pods []string) ([]string, error)
+	Name() string
 }
 
-func New(
-	clusterID string,
-	grafanaBaseURL string,
-	resolver *resolver.Resolver,
-	lokiClient *loki.Client,
-	promClient *prometheus.Client,
-	k8sClient *k8s.Client,
-	redactor *redact.Redactor,
-	fwd *forwarder.Forwarder,
-	logger *zap.Logger,
-) *Pipeline {
+// MetricFetcher returns recent metric series for the alert target. Implemented
+// by internal/prometheus for both Prometheus and VictoriaMetrics, which share
+// the /api/v1/query_range contract.
+type MetricFetcher interface {
+	FetchMetrics(ctx context.Context, targetType, namespace string, pods []string, node string) ([]*pb.MetricSeries, error)
+	Name() string
+}
+
+type Pipeline struct {
+	clusterID       string
+	grafanaBaseURL  string
+	grafanaLogsDS   string
+	resolver        *resolver.Resolver
+	logs            LogFetcher
+	metricsBackend  MetricFetcher
+	k8sClient       *k8s.Client
+	redactor        *redact.Redactor
+	forwarder       *forwarder.Forwarder
+	alertsForwarded atomic.Int64
+	logger          *zap.Logger
+}
+
+// Config carries the pipeline's collaborators. A nil Logs disables log
+// enrichment entirely; a nil Metrics does the same for metrics.
+type Config struct {
+	ClusterID      string
+	GrafanaBaseURL string
+	// GrafanaLogsDatasource names the Grafana datasource holding this
+	// cluster's logs. Sent to the brain so the Explore deep link points at the
+	// right datasource — "Loki" and "VictoriaLogs" need different ones.
+	GrafanaLogsDatasource string
+	Resolver              *resolver.Resolver
+	Logs                  LogFetcher
+	Metrics               MetricFetcher
+	K8s                   *k8s.Client
+	Redactor              *redact.Redactor
+	Forwarder             *forwarder.Forwarder
+}
+
+func New(cfg Config, logger *zap.Logger) *Pipeline {
 	return &Pipeline{
-		clusterID:      clusterID,
-		grafanaBaseURL: grafanaBaseURL,
-		resolver:       resolver,
-		loki:           lokiClient,
-		prom:           promClient,
-		k8sClient:      k8sClient,
-		redactor:       redactor,
-		forwarder:      fwd,
+		clusterID:      cfg.ClusterID,
+		grafanaBaseURL: cfg.GrafanaBaseURL,
+		grafanaLogsDS:  cfg.GrafanaLogsDatasource,
+		resolver:       cfg.Resolver,
+		logs:           cfg.Logs,
+		metricsBackend: cfg.Metrics,
+		k8sClient:      cfg.K8s,
+		redactor:       cfg.Redactor,
+		forwarder:      cfg.Forwarder,
 		logger:         logger,
 	}
 }
+
+// AlertsForwarded reports how many alerts this process has forwarded. Read by
+// the heartbeat sender so the brain can show throughput per cluster.
+func (p *Pipeline) AlertsForwarded() int64 { return p.alertsForwarded.Load() }
 
 func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -82,17 +111,18 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 
 	// Build payload
 	payload := &pb.AlertPayload{
-		ClusterId:      p.clusterID,
-		AlertName:      alertName,
-		Severity:       severity,
-		Namespace:      namespace,
-		PodName:        target.PodName,
-		FiredAt:        alert.StartsAt.Unix(),
-		Summary:        p.redactor.RedactString(alert.Annotations["summary"]),
-		Description:    p.redactor.RedactString(alert.Annotations["description"]),
-		Target:         target,
-		Status:         status,
-		GrafanaBaseUrl: p.grafanaBaseURL,
+		ClusterId:             p.clusterID,
+		AlertName:             alertName,
+		Severity:              severity,
+		Namespace:             namespace,
+		PodName:               target.PodName,
+		FiredAt:               alert.StartsAt.Unix(),
+		Summary:               p.redactor.RedactString(alert.Annotations["summary"]),
+		Description:           p.redactor.RedactString(alert.Annotations["description"]),
+		Target:                target,
+		Status:                status,
+		GrafanaBaseUrl:        p.grafanaBaseURL,
+		GrafanaLogsDatasource: p.grafanaLogsDS,
 	}
 
 	// Convert labels. Both name and value go through the redactor — values are
@@ -116,19 +146,24 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 				zap.Error(err),
 			)
 		} else {
+			p.alertsForwarded.Add(1)
 			p.logger.Info("resolved alert forwarded", zap.String("alert", alertName))
 		}
 		return
 	}
 
-	// Fetch logs from Loki (skipped entirely when disabled via LOKI_ENABLED=false)
-	if p.loki != nil && len(target.ResolvedPods) > 0 && namespace != "" {
-		lokiStart := time.Now()
-		logs, err := p.loki.FetchLogs(ctx, namespace, target.ResolvedPods)
-		metrics.EnrichDuration.WithLabelValues("loki").Observe(time.Since(lokiStart).Seconds())
+	// Fetch logs from the configured backend (skipped entirely when logs are
+	// disabled, which leaves the collector forwarding alerts without excerpts
+	// rather than warning on every alert).
+	if p.logs != nil && len(target.ResolvedPods) > 0 && namespace != "" {
+		backend := p.logs.Name()
+		logsStart := time.Now()
+		logs, err := p.logs.FetchLogs(ctx, namespace, target.ResolvedPods)
+		metrics.EnrichDuration.WithLabelValues(backend).Observe(time.Since(logsStart).Seconds())
 		if err != nil {
-			metrics.EnrichErrors.WithLabelValues("loki").Inc()
-			p.logger.Warn("failed to fetch logs", zap.Error(err))
+			metrics.EnrichErrors.WithLabelValues(backend).Inc()
+			p.logger.Warn("failed to fetch logs",
+				zap.String("backend", backend), zap.Error(err))
 		} else if len(logs) > 0 {
 			redacted, stats := p.redactor.Redact(logs)
 			payload.RedactedLogs = redacted
@@ -138,18 +173,22 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 		}
 	}
 
-	// Fetch metrics from Prometheus
-	promStart := time.Now()
-	promMetrics, err := p.prom.FetchMetrics(ctx, target.TargetType, namespace, target.ResolvedPods, target.Node)
-	metrics.EnrichDuration.WithLabelValues("prometheus").Observe(time.Since(promStart).Seconds())
-	if err != nil {
-		metrics.EnrichErrors.WithLabelValues("prometheus").Inc()
-		p.logger.Warn("failed to fetch metrics", zap.Error(err))
-	} else {
-		for _, m := range promMetrics {
-			m.Description = p.redactor.RedactString(m.Description)
+	// Fetch metrics from the configured backend.
+	if p.metricsBackend != nil {
+		backend := p.metricsBackend.Name()
+		metricsStart := time.Now()
+		series, err := p.metricsBackend.FetchMetrics(ctx, target.TargetType, namespace, target.ResolvedPods, target.Node)
+		metrics.EnrichDuration.WithLabelValues(backend).Observe(time.Since(metricsStart).Seconds())
+		if err != nil {
+			metrics.EnrichErrors.WithLabelValues(backend).Inc()
+			p.logger.Warn("failed to fetch metrics",
+				zap.String("backend", backend), zap.Error(err))
+		} else {
+			for _, m := range series {
+				m.Description = p.redactor.RedactString(m.Description)
+			}
+			payload.Metrics = series
 		}
-		payload.Metrics = promMetrics
 	}
 
 	// Fetch pod metadata
@@ -200,6 +239,7 @@ func (p *Pipeline) ProcessAlert(alert webhook.Alert) {
 			zap.Error(err),
 		)
 	} else {
+		p.alertsForwarded.Add(1)
 		p.logger.Info("alert forwarded successfully",
 			zap.String("alert", alertName),
 			zap.String("target_type", target.TargetType),
