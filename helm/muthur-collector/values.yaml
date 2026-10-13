@@ -22,8 +22,19 @@ config:
   # tenantId feeds the cert's SPIFFE URI SAN (spiffe://muthur/<tenantId>/<clusterId>).
   # Leave empty to use a plain CN-only identity — the brain will accept both.
   tenantId: ""
+  # Which backend serves log excerpts: "loki" or "victorialogs". These are NOT
+  # interchangeable by URL — VictoriaLogs speaks Loki's ingestion API but not
+  # its query API, so each has its own client and query language.
+  logsBackend: loki
+  # Which backend serves metric series: "prometheus" or "victoriametrics".
+  # These two DO share the /api/v1/query_range contract; choosing
+  # victoriametrics buys tenant headers and accurate labelling, not a
+  # different protocol.
+  metricsBackend: prometheus
+
   # Set lokiEnabled: false on clusters without a logging stack — the collector
   # will still forward alerts, just without redacted log excerpts attached.
+  # The flag gates log enrichment whichever backend serves it.
   lokiEnabled: true
   lokiUrl: http://loki.monitoring.svc:3100
   lokiLookbackMinutes: 15
@@ -31,9 +42,52 @@ config:
   prometheusUrl: http://prometheus.monitoring.svc:9090
   prometheusLookbackMinutes: 30
   prometheusEnabled: true
+
+  # VictoriaLogs — used when logsBackend is "victorialogs".
+  victoriaLogsUrl: http://victoria-logs-single-server.monitoring.svc:9428
+  victoriaLogsLookbackMinutes: 15
+  victoriaLogsMaxLogLines: 200
+  # Tenant headers. Leave empty on a single-tenant instance.
+  victoriaLogsAccountId: ""
+  victoriaLogsProjectId: ""
+
+  # VictoriaMetrics — used when metricsBackend is "victoriametrics". On a
+  # cluster deployment the tenant belongs in the URL path as shown; on a
+  # single-node build drop the /select/0/prometheus prefix.
+  victoriaMetricsUrl: http://vmselect.monitoring.svc:8481/select/0/prometheus
+  victoriaMetricsLookbackMinutes: 30
+  # Tenant headers, honoured by a cluster build started with
+  # -enableMultitenancyViaHeaders (default since v1.150). Redundant when the
+  # tenant is already in the URL path above.
+  victoriaMetricsAccountId: ""
+  victoriaMetricsProjectId: ""
+
+  # Label matchers ANDed into every query, e.g. cluster="prod". REQUIRED when
+  # one backend instance holds several clusters' data — without them a query
+  # for namespace+pod can match an identically-named pod in another cluster
+  # and enrich the alert with someone else's logs.
+  logsExtraSelector: ""
+  metricsExtraSelector: ""
+
+  # Liveness. The collector beats to the brain on this interval; the brain
+  # declares the cluster down after roughly 3 missed beats and notifies. A
+  # final beat on SIGTERM retires the cluster, so a planned uninstall or
+  # rollout does not page anyone.
+  heartbeatEnabled: true
+  heartbeatInterval: 60s
+  # Alert accepted at /pipeline-ok as proof the cluster's own alerting path
+  # still delivers. Route it from AlertManager instead of filtering it out —
+  # see "Proving the alerting path works" in the README. Matched strictly: any
+  # other alert posted to that path is ignored rather than counted as proof.
+  pipelineProbeAlertName: Watchdog
   # Grafana base URL sent with every forwarded alert — muthur uses it to build
   # per-cluster Explore deep links in notifications. Leave empty to omit.
   grafanaBaseUrl: ""
+  # Grafana datasource holding this cluster's logs, used for the Explore deep
+  # link. Empty picks a default matching logsBackend ("Loki" or
+  # "VictoriaLogs") — VictoriaLogs needs the victoriametrics-logs-datasource
+  # plugin, the Loki datasource cannot query it.
+  grafanaLogsDatasource: ""
   logLevel: info
   redactLogStats: true
   redactExtraPatterns: ""

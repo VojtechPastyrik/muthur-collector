@@ -73,4 +73,13 @@ var (
 		Name: "muthur_collector_redact_replacements_total",
 		Help: "Pattern replacements made by the redactor, by surface (log_line | string).",
 	}, []string{"surface"})
+
+	// PipelineProbes counts Watchdog alerts that completed the trip from
+	// Prometheus through AlertManager to this collector. A flat line here
+	// means the cluster's alerting path is broken, even while the collector
+	// itself looks perfectly healthy.
+	PipelineProbes = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "muthur_collector_pipeline_probes_total",
+		Help: "Watchdog alerts received, proving the alerting pipeline works end to end.",
+	})
 )

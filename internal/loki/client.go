@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -16,8 +17,12 @@ type Client struct {
 	baseURL     string
 	lookbackMin int
 	maxLines    int
-	httpClient  *http.Client
-	logger      *zap.Logger
+	// extraSelector is an optional label matcher ANDed into the stream
+	// selector, e.g. `cluster="prod"`. Needed when one Loki instance holds
+	// several clusters' logs and namespace/pod alone is ambiguous.
+	extraSelector string
+	httpClient    *http.Client
+	logger        *zap.Logger
 }
 
 type response struct {
@@ -35,15 +40,19 @@ type stream struct {
 	Values [][]string        `json:"values"`
 }
 
-func NewClient(baseURL string, lookbackMin, maxLines int, logger *zap.Logger) *Client {
+func NewClient(baseURL string, lookbackMin, maxLines int, extraSelector string, logger *zap.Logger) *Client {
 	return &Client{
-		baseURL:     baseURL,
-		lookbackMin: lookbackMin,
-		maxLines:    maxLines,
-		httpClient:  &http.Client{Timeout: 15 * time.Second},
-		logger:      logger,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		lookbackMin:   lookbackMin,
+		maxLines:      maxLines,
+		extraSelector: strings.Trim(strings.TrimSpace(extraSelector), ","),
+		httpClient:    &http.Client{Timeout: 15 * time.Second},
+		logger:        logger,
 	}
 }
+
+// Name identifies the backend in metrics and logs.
+func (c *Client) Name() string { return "loki" }
 
 func (c *Client) FetchLogs(ctx context.Context, namespace string, pods []string) ([]string, error) {
 	if len(pods) == 0 {
@@ -73,7 +82,11 @@ func (c *Client) fetchPodLogs(ctx context.Context, namespace, pod string) ([]str
 	now := time.Now()
 	start := now.Add(-time.Duration(c.lookbackMin) * time.Minute)
 
-	query := fmt.Sprintf(`{namespace=%q, pod=%q}`, namespace, pod)
+	query := fmt.Sprintf(`{namespace=%q, pod=%q`, namespace, pod)
+	if c.extraSelector != "" {
+		query += ", " + c.extraSelector
+	}
+	query += "}"
 
 	params := url.Values{}
 	params.Set("query", query)

@@ -20,6 +20,12 @@ service Brain {
   // client cert presented during the mTLS handshake; the CSR contributes
   // only the new public key.
   rpc SignCSR(SignCSRRequest) returns (SignCSRResponse);
+
+  // Heartbeat reports that a collector is alive. Carries no alert data and
+  // never reaches the LLM or the notifiers directly — the brain records the
+  // timestamp and a watchdog notifies when one stops arriving. Identity comes
+  // from the client cert exactly as for Ingest.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
 message AlertPayload {
@@ -46,6 +52,11 @@ message AlertPayload {
   string grafana_base_url = 18; // collector-provided Grafana base URL
 
   repeated KubernetesEvent events = 19; // recent events on the alert target
+
+  // Name of the Grafana datasource holding this cluster's logs, used to build
+  // the Explore deep link. Per-cluster because a fleet can mix log backends
+  // (Loki and VictoriaLogs need different datasources). Empty means "Loki".
+  string grafana_logs_datasource = 20;
 }
 
 message AlertTarget {
@@ -122,3 +133,32 @@ message SignCSRResponse {
   string certificate = 1; // PEM leaf
   string ca          = 2; // PEM intermediate CA
 }
+
+// HeartbeatRequest is the collector's liveness beat. Deliberately small: a
+// fleet of N collectors sends one of these every interval forever, so every
+// field has to earn its bandwidth.
+message HeartbeatRequest {
+  string cluster_id        = 1;
+  string collector_version = 2; // chart/app version, for fleet drift visibility
+  int64  started_at        = 3; // unix seconds; process start, detects restarts
+  int32  interval_seconds  = 4; // this collector's beat period, drives staleness
+  int64  alerts_forwarded  = 5; // cumulative since started_at
+
+  // ShuttingDown marks the final beat sent during graceful shutdown. It
+  // retires the cluster from the watchdog roster so a planned teardown
+  // (helm uninstall, node drain) does not page anyone.
+  bool shutting_down = 6;
+
+  // PipelineLastSeen is the unix timestamp of the last Watchdog alert that
+  // reached the collector through the cluster's own AlertManager, or 0 when
+  // the operator has not routed one.
+  //
+  // A plain heartbeat only proves the collector process is running. A cluster
+  // whose Prometheus has crashed, or whose AlertManager routes into a black
+  // hole, still has a perfectly healthy collector — and no alert would ever
+  // arrive. Watchdog fires constantly by design, so its arrival proves rule
+  // evaluation AND routing both work; its absence condemns the whole chain.
+  int64 pipeline_last_seen = 7;
+}
+
+message HeartbeatResponse {}

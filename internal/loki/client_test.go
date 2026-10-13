@@ -36,7 +36,7 @@ func TestClient_FetchLogs(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, 15, 200, zap.NewNop())
+	c := NewClient(server.URL, 15, 200, "", zap.NewNop())
 	c.httpClient = server.Client()
 
 	logs, err := c.FetchLogs(context.Background(), "default", []string{"app-123"})
@@ -52,7 +52,7 @@ func TestClient_FetchLogs(t *testing.T) {
 }
 
 func TestClient_FetchLogs_NoPods(t *testing.T) {
-	c := NewClient("http://localhost", 15, 200, zap.NewNop())
+	c := NewClient("http://localhost", 15, 200, "", zap.NewNop())
 
 	logs, err := c.FetchLogs(context.Background(), "default", nil)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestClient_FetchLogs_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, 15, 200, zap.NewNop())
+	c := NewClient(server.URL, 15, 200, "", zap.NewNop())
 	c.httpClient = server.Client()
 
 	logs, err := c.FetchLogs(context.Background(), "default", []string{"app-123"})
