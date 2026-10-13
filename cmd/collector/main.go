@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,14 +19,21 @@ import (
 	"github.com/VojtechPastyrik/muthur-collector/internal/auth"
 	"github.com/VojtechPastyrik/muthur-collector/internal/config"
 	"github.com/VojtechPastyrik/muthur-collector/internal/forwarder"
+	"github.com/VojtechPastyrik/muthur-collector/internal/heartbeat"
 	"github.com/VojtechPastyrik/muthur-collector/internal/k8s"
 	"github.com/VojtechPastyrik/muthur-collector/internal/loki"
 	"github.com/VojtechPastyrik/muthur-collector/internal/pipeline"
 	"github.com/VojtechPastyrik/muthur-collector/internal/prometheus"
 	"github.com/VojtechPastyrik/muthur-collector/internal/redact"
 	"github.com/VojtechPastyrik/muthur-collector/internal/resolver"
+	"github.com/VojtechPastyrik/muthur-collector/internal/victorialogs"
 	"github.com/VojtechPastyrik/muthur-collector/internal/webhook"
 )
+
+// version is reported in heartbeats so the brain can show fleet version drift.
+// Set from the chart (COLLECTOR_VERSION, wired to .Chart.AppVersion) rather
+// than at build time, so one image can report the chart it was deployed by.
+var version = "dev"
 
 func main() {
 	if err := dispatch(); err != nil {
@@ -151,16 +161,46 @@ func runServer() error {
 		k8sClient = nil
 	}
 
-	// Components — loki is optional (clusters without a logging stack can
-	// disable it via LOKI_ENABLED=false and the collector will forward
-	// alerts without log excerpts instead of spamming warnings).
-	var lokiClient *loki.Client
-	if cfg.LokiEnabled {
-		lokiClient = loki.NewClient(cfg.LokiURL, cfg.LokiLookbackMinutes, cfg.LokiMaxLogLines, logger)
+	// Log enrichment is optional (clusters without a logging stack set
+	// LOKI_ENABLED=false and the collector forwards alerts without excerpts
+	// instead of spamming warnings). The interface variable stays nil in that
+	// case — assigning a typed nil pointer to it would produce a non-nil
+	// interface and a panic on the first alert.
+	var logFetcher pipeline.LogFetcher
+	if cfg.LogsEnabled() {
+		switch cfg.LogsBackend {
+		case config.BackendVictoriaLogs:
+			logFetcher = victorialogs.NewClient(victorialogs.Config{
+				BaseURL:     cfg.VictoriaLogsURL,
+				LookbackMin: cfg.VictoriaLogsLookbackMinutes,
+				MaxLines:    cfg.VictoriaLogsMaxLogLines,
+				ExtraFilter: cfg.LogsExtraSelector,
+				AccountID:   cfg.VictoriaLogsAccountID,
+				ProjectID:   cfg.VictoriaLogsProjectID,
+			}, logger)
+		default:
+			logFetcher = loki.NewClient(cfg.LokiURL, cfg.LokiLookbackMinutes, cfg.LokiMaxLogLines, cfg.LogsExtraSelector, logger)
+		}
+		logger.Info("log enrichment enabled", zap.String("backend", cfg.LogsBackend))
 	} else {
-		logger.Info("Loki integration disabled — alerts will be forwarded without log excerpts")
+		logger.Info("log enrichment disabled — alerts will be forwarded without log excerpts")
 	}
-	promClient := prometheus.NewClient(cfg.PrometheusURL, cfg.PrometheusLookbackMin, cfg.PrometheusEnabled, logger)
+
+	var metricFetcher pipeline.MetricFetcher
+	switch cfg.MetricsBackend {
+	case config.BackendVictoriaMetrics:
+		metricFetcher = prometheus.NewVictoriaMetrics(prometheus.Config{
+			BaseURL:       cfg.VictoriaMetricsURL,
+			LookbackMin:   cfg.VictoriaMetricsLookbackMinutes,
+			Enabled:       cfg.PrometheusEnabled,
+			ExtraSelector: cfg.MetricsExtraSelector,
+			AccountID:     cfg.VictoriaMetricsAccountID,
+			ProjectID:     cfg.VictoriaMetricsProjectID,
+		}, logger)
+	default:
+		metricFetcher = prometheus.NewClient(cfg.PrometheusURL, cfg.PrometheusLookbackMin, cfg.PrometheusEnabled, logger)
+	}
+	logger.Info("metric enrichment configured", zap.String("backend", cfg.MetricsBackend))
 	redactor := redact.New(cfg.RedactExtraPatterns, cfg.RedactLogStats, cfg.RedactMaxLineBytes, cfg.RedactMaxTotalBytes, cfg.RedactMaxStringBytes, logger)
 
 	// mTLS keypair is hot-reloaded from the mounted Secret. The renew CronJob
@@ -191,7 +231,33 @@ func runServer() error {
 	}
 	defer fwd.Close()
 	res := resolver.New(k8sClient, logger)
-	pipe := pipeline.New(cfg.ClusterID, cfg.GrafanaBaseURL, res, lokiClient, promClient, k8sClient, redactor, fwd, logger)
+	pipe := pipeline.New(pipeline.Config{
+		ClusterID:             cfg.ClusterID,
+		GrafanaBaseURL:        cfg.GrafanaBaseURL,
+		GrafanaLogsDatasource: cfg.GrafanaLogsDatasource,
+		Resolver:              res,
+		Logs:                  logFetcher,
+		Metrics:               metricFetcher,
+		K8s:                   k8sClient,
+		Redactor:              redactor,
+		Forwarder:             fwd,
+	}, logger)
+
+	// Liveness. Without this the brain cannot tell a quiet cluster from a dead
+	// one: a collector that stops forwarding simply stops being heard from.
+	// The Watchdog probe upgrades the heartbeat from "this process runs" to
+	// "the whole alerting path runs". Always constructed; it simply reports
+	// zero until an operator routes Watchdog here, which the brain reads as
+	// "not configured" rather than as a broken pipeline.
+	probe := heartbeat.NewProbe()
+
+	beater := heartbeat.New(fwd, pipe, probe, heartbeat.Config{
+		Enabled:   cfg.HeartbeatEnabled,
+		ClusterID: cfg.ClusterID,
+		Version:   collectorVersion(),
+		Interval:  cfg.HeartbeatInterval,
+	}, logger)
+	beater.Start()
 
 	// HTTP server
 	r := chi.NewRouter()
@@ -201,6 +267,13 @@ func runServer() error {
 	handler := webhook.NewHandler(pipe, cfg.WebhookMaxConcurrent, logger)
 	r.Post("/webhook", handler.ServeHTTP)
 
+	// Separate route from /webhook on purpose: a Watchdog alert must never be
+	// forwarded to the brain, never reach the LLM, and never cost a token. It
+	// fires every minute forever — routing it as an alert would be a
+	// permanent self-inflicted storm.
+	probeHandler := webhook.NewPipelineHandler(probe, cfg.PipelineProbeAlertName, logger)
+	r.Post("/pipeline-ok", probeHandler.ServeHTTP)
+
 	r.Handle("/metrics", promhttp.Handler())
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -209,12 +282,55 @@ func runServer() error {
 	})
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
+	srv := &http.Server{Addr: addr, Handler: r}
+
 	logger.Info("starting muthur-collector",
 		zap.String("addr", addr),
 		zap.String("cluster_id", cfg.ClusterID),
 		zap.String("auth_mode", cfg.AuthMode),
+		zap.String("logs_backend", cfg.LogsBackend),
+		zap.String("metrics_backend", cfg.MetricsBackend),
+		zap.String("version", collectorVersion()),
 	)
-	return http.ListenAndServe(addr, r)
+
+	// Graceful shutdown exists for one reason: the final heartbeat. Without
+	// it every rollout, drain and `helm uninstall` would look identical to a
+	// crash and page somebody. SIGTERM is what Kubernetes sends first.
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-sigCh:
+		logger.Info("shutdown signal received", zap.String("signal", sig.String()))
+	}
+
+	// Stop accepting alerts first, so the goodbye beat is the last word the
+	// brain hears from this collector.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("http shutdown failed", zap.Error(err))
+	}
+	beater.Stop(shutdownCtx)
+	return nil
+}
+
+// collectorVersion reports the chart-supplied version, falling back to the
+// build-time default when the chart did not set one.
+func collectorVersion() string {
+	if v := os.Getenv("COLLECTOR_VERSION"); v != "" {
+		return v
+	}
+	return version
 }
 
 func newLogger(level string) (*zap.Logger, error) {
