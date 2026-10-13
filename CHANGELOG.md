@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.12.0] — 2026-10-13
+
+### Added
+
+- **VictoriaLogs as a log backend (`config.logsBackend: victorialogs`).**
+  A separate client, not a URL swap: VictoriaLogs' Loki compatibility
+  covers ingestion only, so reads go to `/select/logsql/query`, speak
+  LogsQL, and arrive as newline-delimited JSON instead of a wrapped
+  envelope. The stream selector `{namespace=…, pod=…}` is the one thing
+  both query languages share, so the built query is textually identical
+  to the Loki one. Optional `AccountID`/`ProjectID` tenant headers.
+- **VictoriaMetrics as a metrics backend (`config.metricsBackend:
+  victoriametrics`).** Shares the `/api/v1/query_range` contract with
+  Prometheus, so the query builders are unchanged; the backend adds
+  tenant headers and accurate labelling on enrichment metrics and logs.
+  Put the tenant in the URL path (`/select/0/prometheus`) on a cluster
+  deployment.
+- **Heartbeat (`config.heartbeatEnabled`, default on).** The collector
+  beats to the brain every `heartbeatInterval`; the brain declares the
+  cluster down after roughly three missed beats and notifies. Closes the
+  gap where a dead collector was indistinguishable from a quiet cluster —
+  an `absent()` rule inside the monitored cluster dies with the cluster
+  it watches.
+- **Graceful shutdown.** SIGTERM drains the HTTP server and sends a final
+  beat marked `shutting_down`, retiring the cluster from the brain's
+  watchdog. Without it every rollout and `helm uninstall` would look
+  exactly like a crash and page someone.
+- **`/pipeline-ok` endpoint.** Route the `Watchdog` alert here from
+  AlertManager and the heartbeat carries proof that the cluster's own
+  alerting path still delivers, not merely that the collector process is
+  up. A crashed Prometheus, a stopped AlertManager or a bad route all
+  leave the collector perfectly healthy while alerts are being lost;
+  this is the only signal that separates those from a quiet cluster.
+  Watchdog is never forwarded to the brain, never reaches the LLM and
+  never costs a token — the handler only moves a timestamp. Strict
+  alertname matching (`PIPELINE_PROBE_ALERTNAME`, default `Watchdog`),
+  since an unchecked endpoint would let anything forge that proof.
+  Counted as `muthur_collector_pipeline_probes_total`.
+- `config.logsExtraSelector` / `config.metricsExtraSelector` append a
+  label matcher (e.g. `cluster="prod"`) to every query. Required when one
+  backend instance holds several clusters' data — namespace and pod name
+  alone are then ambiguous and an alert could be enriched with another
+  cluster's logs.
+- `config.grafanaLogsDatasource` is sent to the brain so the Explore deep
+  link points at the right datasource. Empty picks a default matching the
+  logs backend; VictoriaLogs needs the `victoriametrics-logs-datasource`
+  plugin, which the Loki datasource cannot stand in for.
+
+### Changed
+
+- `LOKI_ENABLED` keeps its name and now gates log enrichment whichever
+  backend serves it. Existing values files need no change.
+- Enrichment metrics (`muthur_collector_enrich_*`) are labelled with the
+  active backend name rather than a hardcoded `loki` / `prometheus`.
+- Requires muthur (central) `>=0.11.0`. Protobuf contract changed
+  (`grafana_logs_datasource`, `Heartbeat` RPC) — deploy the brain first.
+
 ## [0.11.0] — 2026-09-10
 
 ### Added
