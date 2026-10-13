@@ -30,6 +30,7 @@ const (
 	SignedPathBootstrap = "/muthur/v1/bootstrap"
 	SignedPathIngest    = "/muthur/v1/ingest"
 	SignedPathSignCSR   = "/muthur/v1/sign-csr"
+	SignedPathHeartbeat = "/muthur/v1/heartbeat"
 
 	// Error code the brain returns when it no longer holds the HPKE key a
 	// request was sealed to; the client refetches keys and retries once.
@@ -172,6 +173,15 @@ func (c *SignedClient) Ingest(ctx context.Context, payload *pb.AlertPayload, cli
 	}
 	var resp pb.IngestResponse
 	return c.call(ctx, SignedPathIngest, payload, &resp, clientCert)
+}
+
+// Heartbeat reports collector liveness over the signed transport.
+func (c *SignedClient) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest, clientCert *tls.Certificate) error {
+	if clientCert == nil {
+		return errors.New("auth: client cert required for heartbeat")
+	}
+	var resp pb.HeartbeatResponse
+	return c.call(ctx, SignedPathHeartbeat, req, &resp, clientCert)
 }
 
 func (c *SignedClient) call(ctx context.Context, path string, req, resp proto.Message, cred *tls.Certificate) error {
