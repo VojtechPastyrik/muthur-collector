@@ -7,6 +7,8 @@ metadata:
 data:
   CLUSTER_ID: {{ .Values.config.clusterId | quote }}
   TENANT_ID: {{ .Values.config.tenantId | default "" | quote }}
+  LOGS_BACKEND: {{ .Values.config.logsBackend | quote }}
+  METRICS_BACKEND: {{ .Values.config.metricsBackend | quote }}
   LOKI_ENABLED: {{ .Values.config.lokiEnabled | quote }}
   LOKI_URL: {{ .Values.config.lokiUrl | quote }}
   LOKI_LOOKBACK_MINUTES: {{ .Values.config.lokiLookbackMinutes | quote }}
@@ -14,7 +16,24 @@ data:
   PROMETHEUS_URL: {{ .Values.config.prometheusUrl | quote }}
   PROMETHEUS_LOOKBACK_MINUTES: {{ .Values.config.prometheusLookbackMinutes | quote }}
   PROMETHEUS_ENABLED: {{ .Values.config.prometheusEnabled | quote }}
+  VICTORIALOGS_URL: {{ .Values.config.victoriaLogsUrl | quote }}
+  VICTORIALOGS_LOOKBACK_MINUTES: {{ .Values.config.victoriaLogsLookbackMinutes | quote }}
+  VICTORIALOGS_MAX_LOG_LINES: {{ .Values.config.victoriaLogsMaxLogLines | quote }}
+  VICTORIALOGS_ACCOUNT_ID: {{ .Values.config.victoriaLogsAccountId | default "" | quote }}
+  VICTORIALOGS_PROJECT_ID: {{ .Values.config.victoriaLogsProjectId | default "" | quote }}
+  VICTORIAMETRICS_URL: {{ .Values.config.victoriaMetricsUrl | quote }}
+  VICTORIAMETRICS_LOOKBACK_MINUTES: {{ .Values.config.victoriaMetricsLookbackMinutes | quote }}
+  VICTORIAMETRICS_ACCOUNT_ID: {{ .Values.config.victoriaMetricsAccountId | default "" | quote }}
+  VICTORIAMETRICS_PROJECT_ID: {{ .Values.config.victoriaMetricsProjectId | default "" | quote }}
+  LOGS_EXTRA_SELECTOR: {{ .Values.config.logsExtraSelector | default "" | quote }}
+  METRICS_EXTRA_SELECTOR: {{ .Values.config.metricsExtraSelector | default "" | quote }}
+  HEARTBEAT_ENABLED: {{ .Values.config.heartbeatEnabled | quote }}
+  HEARTBEAT_INTERVAL: {{ .Values.config.heartbeatInterval | quote }}
+  PIPELINE_PROBE_ALERTNAME: {{ .Values.config.pipelineProbeAlertName | quote }}
+  # Reported in heartbeats so the brain can show version drift across the fleet.
+  COLLECTOR_VERSION: {{ .Chart.AppVersion | quote }}
   GRAFANA_BASE_URL: {{ .Values.config.grafanaBaseUrl | quote }}
+  GRAFANA_LOGS_DATASOURCE: {{ .Values.config.grafanaLogsDatasource | default "" | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
   REDACT_LOG_STATS: {{ .Values.config.redactLogStats | quote }}
   REDACT_EXTRA_PATTERNS: {{ .Values.config.redactExtraPatterns | quote }}
